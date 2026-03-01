@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Subtext web server — launchd user agent
+  ========================================
+  Installation (run once):
+
+    1. Fill in YOUR_PROJECT_PATH and YOUR_API_KEY below.
+    2. Copy to ~/Library/LaunchAgents/:
+         cp com.subtext.web.plist ~/Library/LaunchAgents/
+    3. Load it (starts immediately and on every login):
+         launchctl load ~/Library/LaunchAgents/com.subtext.web.plist
+    4. Verify it is running:
+         launchctl list | grep subtext
+         curl http://localhost:8765/health
+
+  To stop / unload:
+         launchctl unload ~/Library/LaunchAgents/com.subtext.web.plist
+
+  Logs:
+         tail -f /tmp/subtext-web.log
+         tail -f /tmp/subtext-web.err
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.subtext.web</string>
+
+  <!-- ── Change these two paths ─────────────────────────────────────────── -->
+  <key>ProgramArguments</key>
+  <array>
+    <!-- Full path to the 'uv' binary.  Find it with: which uv -->
+    <string>/usr/local/bin/uv</string>
+    <string>run</string>
+    <string>python</string>
+    <string>run_web.py</string>
+  </array>
+
+  <!-- Absolute path to the Subtext project folder -->
+  <key>WorkingDirectory</key>
+  <string>/YOUR_PROJECT_PATH/Subtext</string>
+  <!-- ──────────────────────────────────────────────────────────────────── -->
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- Remove this key entirely to run without auth (Tailscale-only access) -->
+    <key>SUBTEXT_API_KEY</key>
+    <string>YOUR_API_KEY</string>
+
+    <!-- Keep PATH consistent so yt-dlp / ffmpeg are found -->
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <!-- Start at login and keep alive if it crashes -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Throttle rapid restarts (e.g. missing ffmpeg) -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/subtext-web.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/subtext-web.err</string>
+</dict>
+</plist>
