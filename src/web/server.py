@@ -9,12 +9,13 @@ Tailscale API key auth:
 """
 import asyncio
 import os
+import secrets
 import uuid
 from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -39,7 +40,7 @@ def _require_auth(authorization: str = Header(default="")) -> None:
     """Dependency: validate Bearer token when SUBTEXT_API_KEY is configured."""
     if not _API_KEY:
         return  # no key set → open (safe behind Tailscale ACLs)
-    if authorization != f"Bearer {_API_KEY}":
+    if not secrets.compare_digest(authorization, f"Bearer {_API_KEY}"):
         raise HTTPException(status_code=401, detail="Invalid or missing API key.")
 
 WHISPER_MODELS = ["tiny.en", "base.en", "small.en", "medium.en", "large-v3"]
@@ -156,7 +157,7 @@ class QuickRequest(BaseModel):
 
 async def _run_quick(url: str, model: str) -> str:
     """Run the full pipeline and return the transcript text, or raise on error."""
-    model = model.strip() if model in WHISPER_MODELS else "small.en"
+    model = m if (m := model.strip()) in WHISPER_MODELS else "small.en"
     processor = UnifiedProcessor(
         model=model,
         download_only=False,
@@ -177,7 +178,7 @@ async def _run_quick(url: str, model: str) -> str:
 async def quick_transcribe_post(
     body: QuickRequest,
     _: None = Depends(_require_auth),
-) -> Any:
+) -> Response:
     """
     Synchronous transcription — returns the transcript directly (no polling).
 
@@ -188,7 +189,7 @@ async def quick_transcribe_post(
     transcript = await _run_quick(body.url, body.model)
     if body.plain_text:
         return PlainTextResponse(transcript)
-    return {"transcript": transcript, "url": body.url, "model": body.model}
+    return JSONResponse({"transcript": transcript, "url": body.url, "model": body.model})
 
 
 @app.get("/api/quick")
@@ -197,7 +198,7 @@ async def quick_transcribe_get(
     model: str = Query(default="small.en"),
     plain_text: bool = Query(default=False, description="Return bare text instead of JSON"),
     _: None = Depends(_require_auth),
-) -> Any:
+) -> Response:
     """
     Synchronous transcription via GET — convenient for curl and Shortcuts URL actions.
 
@@ -207,7 +208,7 @@ async def quick_transcribe_get(
     transcript = await _run_quick(url, model)
     if plain_text:
         return PlainTextResponse(transcript)
-    return {"transcript": transcript, "url": url, "model": model}
+    return JSONResponse({"transcript": transcript, "url": url, "model": model})
 
 
 # Static files (HTML, CSS, JS)

@@ -23,27 +23,31 @@ if [[ -z "$UV_PATH" ]]; then
 fi
 echo "Found uv at: $UV_PATH"
 
-# ── Build the plist from the template ────────────────────────────────────────
+# ── Build the plist from the template (via plistlib — safe for any key value) ─
 TMP_PLIST="$(mktemp /tmp/com.subtext.web.XXXXXX.plist)"
-sed \
-  -e "s|/usr/local/bin/uv|$UV_PATH|g" \
-  -e "s|/YOUR_PROJECT_PATH/Subtext|$PROJECT_ROOT|g" \
-  "$PLIST_SRC" > "$TMP_PLIST"
-
-if [[ -n "$API_KEY" ]]; then
-  # Replace the placeholder key value
-  sed -i '' "s|YOUR_API_KEY|$API_KEY|g" "$TMP_PLIST"
-else
-  # Remove the SUBTEXT_API_KEY block entirely so the server runs open
-  python3 - "$TMP_PLIST" <<'PYEOF'
+python3 - "$PLIST_SRC" "$TMP_PLIST" "$UV_PATH" "$PROJECT_ROOT" "$API_KEY" <<'PYEOF'
 import sys, plistlib, pathlib
-path = pathlib.Path(sys.argv[1])
-with open(path, "rb") as f:
+
+src, dst, uv_path, project_root, api_key = sys.argv[1:]
+with open(src, "rb") as f:
     pl = plistlib.load(f)
-pl.get("EnvironmentVariables", {}).pop("SUBTEXT_API_KEY", None)
-with open(path, "wb") as f:
+
+# Fix uv path and working directory
+args = pl.get("ProgramArguments", [])
+pl["ProgramArguments"] = [uv_path if a == "/usr/local/bin/uv" else a for a in args]
+pl["WorkingDirectory"] = project_root
+
+env = pl.setdefault("EnvironmentVariables", {})
+if api_key:
+    env["SUBTEXT_API_KEY"] = api_key
+else:
+    env.pop("SUBTEXT_API_KEY", None)
+
+with open(dst, "wb") as f:
     plistlib.dump(pl, f)
 PYEOF
+
+if [[ -z "$API_KEY" ]]; then
   echo "No API key given — server will run without authentication."
 fi
 
