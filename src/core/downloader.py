@@ -173,7 +173,9 @@ class UniversalDownloader:
                 "writesubtitles": True,
                 "writeautomaticsub": True,
                 "subtitlesformat": "vtt/srt/best",
-                "subtitleslangs": ["en-US", "en-GB", "en", "en.*", ".*"],
+                # Only English variants — ".*" would download every language and then
+                # we'd pick one at random.  Non-English audio falls through to Whisper.
+                "subtitleslangs": ["en", "en-orig", "en-US", "en-GB", "en-.*"],
                 "outtmpl": str(self.transcripts_dir / "%(title).80B [%(id)s].%(ext)s"),
                 "quiet": True,
                 "noprogress": True,
@@ -184,6 +186,12 @@ class UniversalDownloader:
             }
             if cookie_browser:
                 ydl_opts["cookiesfrombrowser"] = (cookie_browser,)
+            # Support a Netscape-format cookies file for server deployments where
+            # browser-based cookie extraction is unavailable.
+            # Set SUBTEXT_YT_COOKIES=/path/to/cookies.txt (exported from your browser).
+            cookies_file = os.getenv("SUBTEXT_YT_COOKIES", "").strip()
+            if cookies_file and Path(cookies_file).exists():
+                ydl_opts["cookiefile"] = cookies_file
 
             before_files = {p.resolve() for p in self.transcripts_dir.glob("*")}
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -197,13 +205,17 @@ class UniversalDownloader:
                 if path.suffix.lower() not in {".vtt", ".srt"}:
                     continue
                 name = path.name
-                if video_id and f"[{video_id}]" not in name:
+                # video_id appears literally in the filename regardless of whether
+                # restrictfilenames replaced surrounding brackets with underscores
+                if video_id and video_id not in name:
                     continue
                 candidates.append(path)
 
             if not candidates:
-                # Fallback: pick the newest matching subtitle-like file.
+                # Fallback: pick the newest subtitle-like file added in this run.
                 for path in self.transcripts_dir.glob("*"):
+                    if path.resolve() in before_files:
+                        continue
                     if path.suffix.lower() in {".vtt", ".srt"}:
                         candidates.append(path)
 

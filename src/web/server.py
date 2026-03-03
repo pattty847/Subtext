@@ -110,7 +110,10 @@ async def _run_job(job_id: str, input_text: str, model: str) -> None:
         keep_video=False,
         copy_files=False,
         youtube_captions_first=True,
-        use_browser_cookies=True,
+        # Web servers have no browser sessions; browser cookie extraction will
+        # always fail silently and add latency.  A cookies.txt file can be
+        # supplied via the SUBTEXT_YT_COOKIES env var instead.
+        use_browser_cookies=False,
     )
     try:
         results = await processor.process_mixed_input(
@@ -164,7 +167,7 @@ async def _run_quick(url: str, model: str) -> str:
         keep_video=False,
         copy_files=False,
         youtube_captions_first=True,
-        use_browser_cookies=True,
+        use_browser_cookies=False,
     )
     results = await processor.process_mixed_input(url.strip())
     item: Optional[ProcessingItem] = results[0] if results else None
