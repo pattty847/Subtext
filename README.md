@@ -26,8 +26,8 @@ Desktop app for downloading media, generating transcripts, and running local AI 
 
 **Easiest: double-click to launch (no terminal or venv needed)**
 
-- **Windows:** double-click **Start Subtext.bat**
-- **macOS:** double-click **Start Subtext.command** (if it doesn’t run, in Terminal: `chmod +x "Start Subtext.command"`)
+- **Windows:** double-click **win-run.bat**
+- **macOS:** double-click **mac-run.command** (if it doesn’t run, in Terminal: `chmod +x "mac-run.command"`)
 
 Choose **Desktop** (full app) or **Web** (browser UI for this PC and same Wi‑Fi devices). The launcher runs `uv sync` automatically on first run.
 
