@@ -3,67 +3,56 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Subtext — Transcribe</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet">
+  <title>Subtext Private</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <div class="wrap">
-    <header class="header">
-      <h1 class="title">Subtext</h1>
-      <p class="tagline">Paste a link or upload a video. Get a transcript.</p>
-    </header>
+  <main class="shell">
+    <section class="hero">
+      <p class="eyebrow">Private Tailnet Transcription</p>
+      <h1>Subtext</h1>
+      <p class="lede">Upload or record a short audio clip from your iPhone and get the transcript back from your Mac.</p>
+    </section>
 
-    <main class="main">
-      <form id="form" class="form">
-        <div class="input-group">
-          <label for="url">Video URL</label>
-          <input type="url" id="url" name="url" placeholder="YouTube, Instagram, X, TikTok, …" autocomplete="off">
-        </div>
-        <p class="or">— or —</p>
-        <div class="input-group">
-          <label for="file">Upload file</label>
-          <input type="file" id="file" name="file" accept=".mp4,.avi,.mov,.mkv,.webm,.m4v,.mp3,.m4a,.wav,.flac,.ogg,.opus">
-        </div>
-        <div class="input-group">
-          <label for="model">Whisper model</label>
-          <select id="model" name="model">
-            <option value="tiny.en">tiny.en (fastest)</option>
-            <option value="base.en">base.en</option>
-            <option value="small.en" selected>small.en</option>
-            <option value="medium.en">medium.en</option>
-            <option value="large-v3">large-v3 (best)</option>
-          </select>
-        </div>
-        <button type="submit" id="submit" class="btn btn-primary">Transcribe</button>
+    <section class="card">
+      <form id="transcribe-form" class="stack">
+        <label class="field">
+          <span>Shared key</span>
+          <input id="api-key" type="password" placeholder="X-Subtext-Key" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </label>
+
+        <label class="field">
+          <span>Web URL</span>
+          <input id="url-input" type="url" placeholder="https://youtube.com/watch?v=..." autocomplete="off" autocapitalize="off" spellcheck="false">
+        </label>
+
+        <p class="hint center-text">or</p>
+
+        <label class="field">
+          <span>Choose File (audio/video)</span>
+          <input id="file-input" type="file" accept="audio/*,video/*,.wav,.m4a,.mp3,.aac,.flac,.ogg,.opus,.webm,.mp4,.mov,.m4v,.avi,.mkv">
+        </label>
+
+        <button id="submit-btn" class="button button-primary" type="submit">Transcribe</button>
       </form>
+    </section>
 
-      <section id="progress" class="progress hidden" aria-live="polite">
-        <p class="progress-message" id="progress-message"></p>
-        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
-      </section>
+    <section id="status-card" class="card hidden" aria-live="polite">
+      <p id="status-text" class="status-text">Uploading...</p>
+    </section>
 
-      <section id="error" class="error hidden" role="alert">
-        <p id="error-text"></p>
-      </section>
+    <section id="result-card" class="card hidden">
+      <div class="result-meta">
+        <span id="duration-pill" class="pill">Duration: 0.0s</span>
+        <span id="latency-pill" class="pill">Latency: 0.0s</span>
+      </div>
+      <textarea id="transcript-output" readonly placeholder="Your transcript will appear here."></textarea>
+      <div class="actions">
+        <button id="copy-btn" class="button button-secondary" type="button">Copy</button>
+      </div>
+    </section>
+  </main>
 
-      <section id="result" class="result hidden">
-        <div class="result-actions">
-          <button type="button" id="copy-btn" class="btn btn-secondary">Copy</button>
-          <a id="download-btn" class="btn btn-secondary" download="transcript.txt">Download .txt</a>
-        </div>
-        <div class="transcript-wrap">
-          <pre id="transcript" class="transcript"></pre>
-        </div>
-      </section>
-    </main>
-
-    <footer class="footer">
-      <p>Runs on this machine. No data is sent elsewhere.</p>
-    </footer>
-  </div>
   <script src="/static/app.js"></script>
 </body>
 </html>

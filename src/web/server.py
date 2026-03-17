@@ -1,233 +1,378 @@
 """
-Web server for Subtext: URL or file upload -> download (yt-dlp) -> transcribe (Whisper).
-Reuses core processor; reachable on 0.0.0.0 for home network (e.g. from phone).
+Private web service for Subtext.
 
-Tailscale API key auth:
-  Set SUBTEXT_API_KEY in the environment (or in the launchd plist).
-  Clients must send:  Authorization: Bearer <key>
-  If the env var is unset the server runs open (safe behind Tailscale).
+The service is designed to run on localhost and be exposed privately through
+Tailscale. Audio uploads are transcribed synchronously with a warm model.
 """
+from __future__ import annotations
+
 import asyncio
+import ipaddress
+import logging
 import os
 import secrets
+import time
 import uuid
+from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 
 from src.config.paths import ProjectPaths
-from src.core.processor import UnifiedProcessor, ProcessingItem
-from src.core.downloader import DownloadProgress
-from src.core.transcriber import TranscriptionProgress
+from src.core.downloader import UniversalDownloader
+from src.core.transcriber import WhisperTranscriber
 
-# Ensure assets exist
 ProjectPaths.initialize()
 
-app = FastAPI(title="Subtext Web", description="Transcribe video from URL or upload")
-JOBS: dict[str, dict[str, Any]] = {}
-
-# ---------------------------------------------------------------------------
-# Auth
-# ---------------------------------------------------------------------------
-_API_KEY: str = os.environ.get("SUBTEXT_API_KEY", "")
-
-
-def _require_auth(authorization: str = Header(default="")) -> None:
-    """Dependency: validate Bearer token when SUBTEXT_API_KEY is configured."""
-    if not _API_KEY:
-        return  # no key set → open (safe behind Tailscale ACLs)
-    if not secrets.compare_digest(authorization, f"Bearer {_API_KEY}"):
-        raise HTTPException(status_code=401, detail="Invalid or missing API key.")
-
+LOGGER = logging.getLogger("subtext.private_service")
+TAILSCALE_NETWORK = ipaddress.ip_network("100.64.0.0/10")
+STATIC_DIR = Path(__file__).parent / "static"
+ALLOWED_EXTENSIONS = {
+    ".wav",
+    ".m4a",
+    ".mp3",
+    ".mp4",
+    ".aac",
+    ".flac",
+    ".ogg",
+    ".opus",
+    ".webm",
+}
 WHISPER_MODELS = ["tiny.en", "base.en", "small.en", "medium.en", "large-v3"]
 
 
-def _update_job(job_id: str, **kwargs: Any) -> None:
-    if job_id in JOBS:
-        JOBS[job_id].update(kwargs)
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-@app.post("/api/transcribe")
-async def create_transcribe_job(
-    model: str = Form("small.en"),
-    url: Optional[str] = Form(None),
-    file: Optional[UploadFile] = None,
-) -> dict[str, str]:
-    """Start a transcription job. Provide either `url` or `file`, not both."""
-    if not url and not file:
-        raise HTTPException(400, "Provide either a URL or an uploaded file.")
-    if url and file:
-        raise HTTPException(400, "Provide either a URL or a file, not both.")
+class ServiceConfig:
+    """Runtime configuration sourced from environment variables."""
 
-    model = (model or "small.en").strip()
-    if model not in WHISPER_MODELS:
-        model = "small.en"
+    def __init__(self) -> None:
+        self.model_name = os.getenv("SUBTEXT_MODEL", "small.en").strip() or "small.en"
+        if self.model_name not in WHISPER_MODELS:
+            self.model_name = "small.en"
 
-    job_id = str(uuid.uuid4())
-    JOBS[job_id] = {
-        "status": "pending",
-        "progress": 0.0,
-        "message": "Starting…",
-        "transcript": None,
-        "error": None,
-    }
-
-    if url:
-        input_text = url.strip()
-    else:
-        # Save uploaded file to assets/videos with a unique name
-        assert file is not None
-        suffix = Path(file.filename or "upload").suffix or ".mp4"
-        safe_name = f"web_upload_{job_id}{suffix}"
-        dest = ProjectPaths.VIDEOS_DIR / safe_name
-        content = await file.read()
-        dest.write_bytes(content)
-        input_text = str(dest)
-
-    asyncio.create_task(_run_job(job_id, input_text, model))
-    return {"job_id": job_id}
+        self.backend = os.getenv("SUBTEXT_WHISPER_BACKEND", "auto").strip() or "auto"
+        self.compute_type = os.getenv("SUBTEXT_COMPUTE_TYPE", "").strip() or None
+        self.server_key = os.getenv("SUBTEXT_SERVER_KEY", "").strip()
+        self.allow_tailscale_ips = _env_flag("SUBTEXT_ALLOW_TAILSCALE_IPS", False)
+        self.allowed_ips = {
+            entry.strip()
+            for entry in os.getenv("SUBTEXT_ALLOWED_IPS", "").split(",")
+            if entry.strip()
+        }
+        self.trust_proxy_headers = _env_flag("SUBTEXT_TRUST_PROXY_HEADERS", False)
 
 
-async def _run_job(job_id: str, input_text: str, model: str) -> None:
-    _update_job(job_id, status="running", message="Processing…")
+class PrivateTranscriptionService:
+    """Warm-model transcription service with a single-flight queue."""
 
-    def progress_cb(msg: str) -> None:
-        _update_job(job_id, message=msg)
+    def __init__(self, config: ServiceConfig) -> None:
+        self.config = config
+        self.downloader = UniversalDownloader()
+        self.transcriber = WhisperTranscriber(
+            model_name=config.model_name,
+            backend=config.backend,
+            compute_type=config.compute_type,
+        )
+        self._lock = asyncio.Lock()
 
-    def download_cb(dp: DownloadProgress) -> None:
-        _update_job(job_id, progress=dp.percent, message=f"Downloading… {dp.percent:.1f}%")
+    async def startup(self) -> None:
+        def progress_callback(progress) -> None:
+            LOGGER.info("startup: %s", progress.message)
 
-    def transcription_cb(tp: TranscriptionProgress) -> None:
-        _update_job(job_id, progress=tp.percent, message=tp.message)
+        await self.transcriber.load_model(progress_callback=progress_callback)
+        LOGGER.info(
+            "whisper_ready model=%s backend=%s device=%s compute_type=%s",
+            self.transcriber.model_name,
+            self.transcriber.backend,
+            self.transcriber.device,
+            self.transcriber.compute_type,
+        )
 
-    processor = UnifiedProcessor(
-        model=model,
-        download_only=False,
-        keep_video=False,
-        copy_files=False,
-        youtube_captions_first=True,
-        # Web servers have no browser sessions; browser cookie extraction will
-        # always fail silently and add latency.  A cookies.txt file can be
-        # supplied via the SUBTEXT_YT_COOKIES env var instead.
-        use_browser_cookies=False,
+    async def shutdown(self) -> None:
+        self.transcriber.unload_model()
+        LOGGER.info("whisper_unloaded")
+
+    async def transcribe_upload(self, file: UploadFile) -> dict[str, float | str]:
+        suffix = Path(file.filename or "upload.wav").suffix.lower()
+        if suffix not in ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported file type. Use wav, m4a, mp3, mp4, aac, flac, ogg, opus, or webm.",
+            )
+
+        temp_path = ProjectPaths.RUNTIME_DIR / f"upload_{uuid.uuid4().hex}{suffix}"
+        started_at = time.perf_counter()
+
+        try:
+            with temp_path.open("wb") as handle:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+
+            async with self._lock:
+                duration = self.transcriber.get_audio_duration(temp_path)
+                text = await self.transcriber.transcribe(temp_path)
+
+            latency = time.perf_counter() - started_at
+            return {
+                "text": text,
+                "duration": round(duration, 3),
+                "latency": round(latency, 3),
+            }
+        finally:
+            await file.close()
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception:
+                LOGGER.warning("cleanup_failed path=%s", temp_path)
+
+    async def transcribe_url(self, url: str) -> dict[str, float | str]:
+        cleaned_url = url.strip()
+        if not cleaned_url:
+            raise HTTPException(status_code=400, detail="URL is required.")
+
+        started_at = time.perf_counter()
+        downloaded_path: Optional[Path] = None
+        try:
+            async with self._lock:
+                downloaded_path = await self.downloader.download(cleaned_url)
+                duration = self.transcriber.get_audio_duration(downloaded_path)
+                text = await self.transcriber.transcribe(downloaded_path)
+
+            latency = time.perf_counter() - started_at
+            return {
+                "text": text,
+                "duration": round(duration, 3),
+                "latency": round(latency, 3),
+            }
+        finally:
+            if downloaded_path is not None:
+                try:
+                    downloaded_path.unlink(missing_ok=True)
+                except Exception:
+                    LOGGER.warning("cleanup_failed path=%s", downloaded_path)
+
+
+def _configure_logging() -> None:
+    if LOGGER.handlers:
+        return
+
+    log_path = ProjectPaths.LOGS_DIR / "private_web.log"
+    formatter = logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s %(message)s",
+        "%Y-%m-%dT%H:%M:%S%z",
+    )
+
+    file_handler = RotatingFileHandler(
+        log_path,
+        maxBytes=1_000_000,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(formatter)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+
+    LOGGER.setLevel(logging.INFO)
+    LOGGER.addHandler(file_handler)
+    LOGGER.addHandler(stream_handler)
+    LOGGER.propagate = False
+
+
+def _extract_client_ip(request: Request, config: ServiceConfig) -> str:
+    direct_ip = request.client.host if request.client else ""
+    if not config.trust_proxy_headers:
+        return direct_ip
+
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+
+    return direct_ip
+
+
+def _ip_allowed(client_ip: str, config: ServiceConfig) -> bool:
+    if not client_ip:
+        return False
+
+    try:
+        parsed_ip = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return False
+
+    if config.allowed_ips:
+        return client_ip in config.allowed_ips
+
+    if config.allow_tailscale_ips:
+        return parsed_ip in TAILSCALE_NETWORK
+
+    return False
+
+
+def _token_allowed(request: Request, config: ServiceConfig) -> bool:
+    if not config.server_key:
+        return False
+
+    header_value = request.headers.get("x-subtext-key", "")
+    return secrets.compare_digest(header_value, config.server_key)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _configure_logging()
+    config = ServiceConfig()
+    service = PrivateTranscriptionService(config)
+    app.state.config = config
+    app.state.service = service
+
+    await service.startup()
+    LOGGER.info(
+        "service_started model=%s backend=%s tailscale_ip_filter=%s explicit_ips=%s",
+        config.model_name,
+        service.transcriber.backend,
+        config.allow_tailscale_ips,
+        sorted(config.allowed_ips),
     )
     try:
-        results = await processor.process_mixed_input(
-            input_text,
-            progress_callback=progress_cb,
-            download_progress_callback=download_cb,
-            transcription_progress_callback=transcription_cb,
-        )
-        item: Optional[ProcessingItem] = results[0] if results else None
-        if item and item.status == "completed" and item.transcript_path and item.transcript_path.exists():
-            transcript = item.transcript_path.read_text(encoding="utf-8")
-            _update_job(
-                job_id,
-                status="completed",
-                progress=100.0,
-                message="Done",
-                transcript=transcript,
-            )
-        elif item and item.status == "error" and item.error_message:
-            _update_job(job_id, status="error", error=item.error_message)
-        else:
-            _update_job(job_id, status="error", error="No transcript produced.")
-    except Exception as e:
-        _update_job(job_id, status="error", error=str(e))
+        yield
+    finally:
+        await service.shutdown()
 
 
-@app.get("/api/jobs/{job_id}")
-async def get_job(job_id: str) -> dict[str, Any]:
-    """Get current job status and result."""
-    if job_id not in JOBS:
-        raise HTTPException(404, "Job not found.")
-    return JOBS[job_id]
+app = FastAPI(
+    title="Subtext Private Service",
+    description="Warm-model Whisper transcription service for Tailscale use.",
+    lifespan=lifespan,
+)
 
-
-# ---------------------------------------------------------------------------
-# /api/quick  –  synchronous endpoint designed for Shortcuts / CLI callers
-# ---------------------------------------------------------------------------
-
-class QuickRequest(BaseModel):
-    url: str
-    model: str = "small.en"
-    plain_text: bool = False  # true → return bare text instead of JSON
-
-
-async def _run_quick(url: str, model: str) -> str:
-    """Run the full pipeline and return the transcript text, or raise on error."""
-    model = m if (m := model.strip()) in WHISPER_MODELS else "small.en"
-    processor = UnifiedProcessor(
-        model=model,
-        download_only=False,
-        keep_video=False,
-        copy_files=False,
-        youtube_captions_first=True,
-        use_browser_cookies=False,
-    )
-    results = await processor.process_mixed_input(url.strip())
-    item: Optional[ProcessingItem] = results[0] if results else None
-    if item and item.status == "completed" and item.transcript_path and item.transcript_path.exists():
-        return item.transcript_path.read_text(encoding="utf-8")
-    error = (item.error_message if item else None) or "No transcript produced."
-    raise HTTPException(status_code=500, detail=error)
-
-
-@app.post("/api/quick")
-async def quick_transcribe_post(
-    body: QuickRequest,
-    _: None = Depends(_require_auth),
-) -> Response:
-    """
-    Synchronous transcription — returns the transcript directly (no polling).
-
-    POST /api/quick
-    Headers: Authorization: Bearer <SUBTEXT_API_KEY>
-    Body (JSON): {"url": "https://...", "model": "small.en", "plain_text": false}
-    """
-    transcript = await _run_quick(body.url, body.model)
-    if body.plain_text:
-        return PlainTextResponse(transcript)
-    return JSONResponse({"transcript": transcript, "url": body.url, "model": body.model})
-
-
-@app.get("/api/quick")
-async def quick_transcribe_get(
-    url: str = Query(..., description="Video URL to transcribe"),
-    model: str = Query(default="small.en"),
-    plain_text: bool = Query(default=False, description="Return bare text instead of JSON"),
-    _: None = Depends(_require_auth),
-) -> Response:
-    """
-    Synchronous transcription via GET — convenient for curl and Shortcuts URL actions.
-
-    GET /api/quick?url=https://...&model=small.en
-    Headers: Authorization: Bearer <SUBTEXT_API_KEY>
-    """
-    transcript = await _run_quick(url, model)
-    if plain_text:
-        return PlainTextResponse(transcript)
-    return JSONResponse({"transcript": transcript, "url": url, "model": model})
-
-
-# Static files (HTML, CSS, JS)
-STATIC_DIR = Path(__file__).parent / "static"
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    started_at = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        client_ip = request.client.host if request.client else "-"
+        LOGGER.exception(
+            "request_failed method=%s path=%s client=%s duration_ms=%.1f",
+            request.method,
+            request.url.path,
+            client_ip,
+            duration_ms,
+        )
+        raise
+
+    duration_ms = (time.perf_counter() - started_at) * 1000
+    client_ip = request.client.host if request.client else "-"
+    LOGGER.info(
+        "request method=%s path=%s status=%s client=%s duration_ms=%.1f",
+        request.method,
+        request.url.path,
+        response.status_code,
+        client_ip,
+        duration_ms,
+    )
+    return response
+
+
+@app.middleware("http")
+async def api_security_middleware(request: Request, call_next):
+    if request.url.path in {"/health"} or request.url.path.startswith("/static"):
+        return await call_next(request)
+    if request.url.path == "/":
+        return await call_next(request)
+
+    config: ServiceConfig = request.app.state.config
+    client_ip = _extract_client_ip(request, config)
+    if _token_allowed(request, config) or _ip_allowed(client_ip, config):
+        return await call_next(request)
+
+    if not config.server_key and not config.allow_tailscale_ips and not config.allowed_ips:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": (
+                "Access control is not configured. Set SUBTEXT_SERVER_KEY or "
+                "SUBTEXT_ALLOWED_IPS before exposing this service through Tailscale."
+            )},
+        )
+
+    return JSONResponse(status_code=403, content={"detail": "Forbidden."})
 
 
 @app.get("/", response_class=HTMLResponse)
 async def index() -> HTMLResponse:
     index_html = STATIC_DIR / "index.html"
     if not index_html.exists():
-        raise HTTPException(404, "Static files not found. Run from project root.")
-    return HTMLResponse(content=index_html.read_text(encoding="utf-8"))
+        raise HTTPException(status_code=404, detail="Static files not found.")
+    return HTMLResponse(index_html.read_text(encoding="utf-8"))
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health(request: Request) -> dict[str, str]:
+    service: PrivateTranscriptionService = request.app.state.service
+    return {
+        "status": "ok",
+        "model": service.transcriber.model_name,
+        "backend": service.transcriber.backend,
+        "device": service.transcriber.device,
+    }
+
+
+@app.post("/transcribe")
+async def transcribe(
+    request: Request,
+    url: str = Form(default=""),
+    file: Optional[UploadFile] = File(default=None),
+) -> dict[str, float | str]:
+    service: PrivateTranscriptionService = request.app.state.service
+
+    has_url = bool(url.strip())
+    has_file = file is not None and bool(file.filename)
+    if has_url == has_file:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either a Web URL or one uploaded audio/video file.",
+        )
+
+    if has_url:
+        result = await service.transcribe_url(url)
+        LOGGER.info(
+            "transcribed_url duration=%.3f latency=%.3f chars=%s",
+            result["duration"],
+            result["latency"],
+            len(str(result["text"])),
+        )
+        return result
+
+    assert file is not None
+    result = await service.transcribe_upload(file)
+    LOGGER.info(
+        "transcribed_file filename=%s duration=%.3f latency=%.3f chars=%s",
+        file.filename,
+        result["duration"],
+        result["latency"],
+        len(str(result["text"])),
+    )
+    return result
+
+
+@app.post("/api/transcribe")
+async def api_transcribe(request: Request, file: UploadFile = File(...)) -> dict[str, float | str]:
+    return await transcribe(request, file)

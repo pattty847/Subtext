@@ -90,9 +90,9 @@ If something cannot be tested locally, clearly note it.
 
 ## Web UI
 
-- `run_web.py`: starts FastAPI (0.0.0.0:8765) for network access
-- `src/web/server.py`: API + static serving; reuses `UnifiedProcessor`
-- `src/web/static/`: single-page UI (URL, file upload, model, copy, download)
+- `run_web.py`: starts the private FastAPI service on `127.0.0.1:8000` by default
+- `src/web/server.py`: private API + static serving; warm-loaded transcription model, request logging, access-control middleware
+- `src/web/static/`: mobile-friendly single-page UI (audio upload, optional recording, transcript display)
 
 ## Common Feature Entry Points
 

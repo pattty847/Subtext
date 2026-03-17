@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
 """
-Run Subtext web UI. Reachable on this machine and on your home network.
+Run the Subtext private transcription service.
 
-  uv run python run_web.py
-
-Then open:
-  - On this PC:  http://127.0.0.1:8765
-  - From phone/tablet (same Wi‑Fi):  http://<THIS_PC_IP>:8765
-
-Find this PC's IP: Windows: ipconfig  |  macOS/Linux: ip addr
+The service binds to localhost only and is meant to be reached through
+Tailscale Serve or another loopback-safe private proxy.
 """
 import sys
+import os
 from pathlib import Path
 
 # Run from project root so src.* imports work
@@ -20,10 +16,13 @@ if str(project_root) not in sys.path:
 
 if __name__ == "__main__":
     import uvicorn
-    # 0.0.0.0 = listen on all interfaces (localhost + LAN IP)
+
+    host = os.getenv("SUBTEXT_SERVER_HOST", "127.0.0.1")
+    port = int(os.getenv("SUBTEXT_SERVER_PORT", "8000"))
+
     uvicorn.run(
         "src.web.server:app",
-        host="0.0.0.0",
-        port=8765,
+        host=host,
+        port=port,
         reload=False,
     )

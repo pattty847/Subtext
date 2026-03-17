@@ -29,7 +29,7 @@ Desktop app for downloading media, generating transcripts, and running local AI 
 - **Windows:** double-click **win-run.bat**
 - **macOS:** double-click **mac-run.command** (if it doesn’t run, in Terminal: `chmod +x "mac-run.command"`)
 
-Choose **Desktop** (full app) or **Web** (browser UI for this PC and same Wi‑Fi devices). The launcher runs `uv sync` automatically on first run.
+Choose **Desktop** (full app) or **Web** (private transcription service). The launcher runs `uv sync` automatically on first run.
 
 **From a terminal (optional):**
 
@@ -38,6 +38,12 @@ uv sync
 uv run python run.py
 # or
 uv run python run_web.py
+```
+
+Optional faster backend:
+
+```bash
+uv sync --extra faster
 ```
 
 ## FFmpeg Setup
@@ -101,23 +107,51 @@ Subtext/
   assets/          # generated files (videos/transcripts/analysis)
 ```
 
-## Web UI (same network)
+## Private Web Service (Tailscale)
 
-Double-click **Start Subtext** and choose **Web**, or run `uv run python run_web.py`. Then:
+The private service is intended for localhost-only binding on the Mac, then private tailnet access from your iPhone.
 
-- On this PC: open **http://127.0.0.1:8765**
-- From iPhone/tablet (same Wi‑Fi): open **http://\<this-PC-IP\>:8765**  
-  (Find IP: `ipconfig` on Windows, `ip addr` or System Settings on Mac/Linux.)
+1. Set environment variables:
 
-Paste a video URL (YouTube, Instagram, X, TikTok, etc.) or upload a file, pick a Whisper model, then copy or download the transcript. Uses the same yt-dlp and Whisper setup as the desktop app.
+   ```bash
+   export SUBTEXT_SERVER_HOST=127.0.0.1
+   export SUBTEXT_SERVER_PORT=8000
+   export SUBTEXT_MODEL=small.en
+   export SUBTEXT_SERVER_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+   ```
+
+2. Start the service:
+
+   ```bash
+   uv run python run_web.py
+   ```
+
+3. Health check locally:
+
+   ```bash
+   curl http://127.0.0.1:8000/health
+   ```
+
+4. Publish it privately to your tailnet without opening a public port:
+
+   ```bash
+   tailscale serve --bg 8000 http://127.0.0.1:8000
+   ```
+
+5. Open the Tailnet URL shown by `tailscale serve status` from Safari on your iPhone. Enter the shared key in the page, then either paste a supported media URL or upload a local audio/video file.
+
+Important:
+- `http://<tailscale-ip>:8000` requires the app to bind directly to the tailnet address, which conflicts with the stricter localhost-only requirement.
+- The shipped default keeps Subtext on `127.0.0.1` and relies on Tailscale to proxy private traffic in.
 
 ## Useful Commands
 
 - Run app: `uv run python run.py`
-- Run web UI: `uv run python run_web.py`
+- Run private web service: `uv run python run_web.py`
 - Build exe: `uv run python scripts/build_exe.py`
 - Update deps: `uv sync --upgrade`
 - Check installed models: `ollama list`
+- Check Tailscale Serve status: `tailscale serve status`
 
 ## Troubleshooting
 
@@ -136,6 +170,11 @@ Paste a video URL (YouTube, Instagram, X, TikTok, etc.) or upload a file, pick a
   - Use smaller Whisper model (`small.en` / `base.en`)
   - Use smaller Ollama models (`llama3.2:1b`, etc.)
   - Stop active Ollama models: `ollama ps` then `ollama stop <model>`
+
+- Private service returns `503 Access control is not configured`:
+  - Set `SUBTEXT_SERVER_KEY`
+  - Or set `SUBTEXT_ALLOWED_IPS` / `SUBTEXT_ALLOW_TAILSCALE_IPS`
+  - Restart the service after changing environment variables
 
 ## License
 

@@ -1,16 +1,22 @@
 """
-Modern audio transcription with Whisper AI
+Modern audio transcription with Whisper AI.
 """
 import asyncio
 import gc
 import shutil
 import subprocess
-import tempfile
 import threading
 import time
 from pathlib import Path
 from typing import Callable, Optional
+
 import whisper
+
+try:
+    from faster_whisper import WhisperModel
+except Exception:  # pragma: no cover
+    WhisperModel = None
+
 try:
     import torch
 except Exception:  # pragma: no cover
@@ -32,9 +38,17 @@ class TranscriptionProgress:
 
 
 class WhisperTranscriber:
-    def __init__(self, model_name: str = "medium.en", device: Optional[str] = None):
+    def __init__(
+        self,
+        model_name: str = "medium.en",
+        device: Optional[str] = None,
+        backend: str = "auto",
+        compute_type: Optional[str] = None,
+    ):
         self.model_name = model_name
         self.device = self._resolve_device(device)
+        self.backend = self._resolve_backend(backend)
+        self.compute_type = compute_type or self._resolve_compute_type()
         self.use_fp16 = self.device == "cuda"
         self.model = None
 
@@ -63,21 +77,63 @@ class WhisperTranscriber:
                 pass
 
         return "cpu"
-        
-    async def load_model(self, progress_callback: Optional[Callable[[TranscriptionProgress], None]] = None):
-        """Load Whisper model asynchronously"""
+
+    def _resolve_backend(self, backend: str) -> str:
+        """Choose an implementation backend with conservative defaults."""
+        requested_backend = (backend or "auto").strip().lower()
+        if requested_backend not in {"auto", "openai", "faster-whisper"}:
+            requested_backend = "auto"
+
+        if requested_backend == "openai":
+            return "openai"
+
+        if requested_backend == "faster-whisper":
+            if WhisperModel is None:
+                raise RuntimeError(
+                    "faster-whisper backend requested but dependency is not installed."
+                )
+            return "faster-whisper"
+
+        if self.device == "cuda" and WhisperModel is not None:
+            return "faster-whisper"
+
+        return "openai"
+
+    def _resolve_compute_type(self) -> str:
+        """Pick a safe compute type for the chosen device/backend."""
+        if self.backend == "faster-whisper":
+            if self.device == "cuda":
+                return "float16"
+            if self.device == "cpu":
+                return "int8"
+        return "float32"
+
+    async def load_model(
+        self,
+        progress_callback: Optional[Callable[[TranscriptionProgress], None]] = None,
+    ) -> None:
+        """Load Whisper model asynchronously."""
         if self.model is not None:
             return
-            
+
         progress = TranscriptionProgress()
         progress.stage = "loading"
-        progress.message = f"Loading {self.model_name} model on {self.device}..."
+        progress.message = (
+            f"Loading {self.model_name} via {self.backend} on {self.device}..."
+        )
         if progress_callback:
             progress_callback(progress)
 
         loop = asyncio.get_event_loop()
 
         def _load_model():
+            if self.backend == "faster-whisper":
+                assert WhisperModel is not None
+                return WhisperModel(
+                    self.model_name,
+                    device=self.device,
+                    compute_type=self.compute_type,
+                )
             return whisper.load_model(self.model_name, device=self.device)
 
         self.model = await loop.run_in_executor(None, _load_model)
@@ -124,6 +180,10 @@ class WhisperTranscriber:
             pass
         return 0.0
 
+    def get_audio_duration(self, audio_path: Path) -> float:
+        """Public duration helper for callers that need request metadata."""
+        return self._get_audio_duration(audio_path)
+
     @staticmethod
     def _ensure_ffmpeg_available() -> None:
         """Validate ffmpeg/ffprobe binaries are available in PATH."""
@@ -137,26 +197,30 @@ class WhisperTranscriber:
                 f"Install FFmpeg: {FFMPEG_DOWNLOAD_URL}"
             )
     
-    async def transcribe(self, audio_path: Path, progress_callback: Optional[Callable[[TranscriptionProgress], None]] = None) -> str:
-        """Transcribe audio file to text"""
+    async def transcribe(
+        self,
+        audio_path: Path,
+        progress_callback: Optional[Callable[[TranscriptionProgress], None]] = None,
+    ) -> str:
+        """Transcribe audio file to text."""
         self._ensure_ffmpeg_available()
 
         if self.model is None:
             await self.load_model(progress_callback)
-        
+
         # Get audio duration for progress estimation
         audio_duration = self._get_audio_duration(audio_path)
         start_time = time.time()
         last_progress_update = 0.0
         transcription_complete = threading.Event()
-        
+
         progress = TranscriptionProgress()
         progress.stage = "processing"
         progress.message = f"Transcribing {audio_path.name}..."
         progress.percent = 0.0
         if progress_callback:
             progress_callback(progress)
-        
+
         # Background thread to update progress based on elapsed time
         progress_thread = None
         if progress_callback:
@@ -188,50 +252,64 @@ class WhisperTranscriber:
                         else:
                             progress_obj.message = f"Transcribing... ({int(elapsed)}s elapsed)"
                         progress_callback(progress_obj)
-                    
+
                     time.sleep(0.5)  # Update every 500ms
-            
+
             progress_thread = threading.Thread(target=update_progress_periodically, daemon=True)
             progress_thread.start()
-        
+
         loop = asyncio.get_event_loop()
-        
+
         def _transcribe():
-            # Use verbose mode to see progress in terminal, but we estimate progress via time
-            result = self.model.transcribe(
-                str(audio_path),
-                fp16=self.use_fp16,
-                verbose=True,
-            )
+            if self.backend == "faster-whisper":
+                segments, _info = self.model.transcribe(
+                    str(audio_path),
+                    beam_size=1,
+                    vad_filter=True,
+                    condition_on_previous_text=False,
+                )
+                result = " ".join(segment.text.strip() for segment in segments).strip()
+            else:
+                result = self.model.transcribe(
+                    str(audio_path),
+                    fp16=self.use_fp16,
+                    verbose=True,
+                )["text"].strip()
             transcription_complete.set()  # Signal that transcription is done
-            return result["text"].strip()
-            
+            return result
+
         try:
             transcript = await loop.run_in_executor(None, _transcribe)
-            
+
             # Wait a moment for final progress update
             if progress_thread:
                 progress_thread.join(timeout=1.0)
-            
+
             progress.stage = "saving"
             progress.percent = 100.0
             progress.message = "Transcription complete"
             if progress_callback:
                 progress_callback(progress)
-                
+
             return transcript
-            
+
         except Exception as e:
             transcription_complete.set()  # Signal error
             if progress_thread:
                 progress_thread.join(timeout=0.5)
             raise Exception(f"Transcription failed: {str(e)}")
 
-    async def transcribe_and_save(self, audio_path: Path, output_path: Optional[Path] = None, transcripts_dir: Optional[Path] = None, progress_callback: Optional[Callable[[TranscriptionProgress], None]] = None) -> tuple[str, Path]:
-        """Transcribe and save to file, returns (transcript_text, output_file_path)"""
-        
+    async def transcribe_and_save(
+        self,
+        audio_path: Path,
+        output_path: Optional[Path] = None,
+        transcripts_dir: Optional[Path] = None,
+        progress_callback: Optional[Callable[[TranscriptionProgress], None]] = None,
+    ) -> tuple[str, Path]:
+        """Transcribe and save to file, returns (transcript_text, output_file_path)."""
+
         transcript = await self.transcribe(audio_path, progress_callback)
-        
+
         if output_path is None:
             # Save to organized transcripts directory
             if transcripts_dir:
@@ -247,14 +325,14 @@ class WhisperTranscriber:
         progress.percent = 90.0
         if progress_callback:
             progress_callback(progress)
-            
+
         output_path.write_text(transcript, encoding='utf-8')
-        
+
         progress.percent = 100.0
         progress.message = f"Saved to {output_path.name}"
         if progress_callback:
             progress_callback(progress)
-            
+
         return transcript, output_path
 
 

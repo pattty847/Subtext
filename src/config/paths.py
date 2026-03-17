@@ -15,11 +15,19 @@ class ProjectPaths:
     VIDEOS_DIR = ASSETS_DIR / "videos"
     TRANSCRIPTS_DIR = ASSETS_DIR / "transcripts"
     ANALYSIS_DIR = ASSETS_DIR / "analysis"
+    LOGS_DIR = ASSETS_DIR / "logs"
+    RUNTIME_DIR = ASSETS_DIR / "runtime"
     
     @classmethod
     def ensure_directories(cls):
         """Create all required directories"""
-        for path in [cls.VIDEOS_DIR, cls.TRANSCRIPTS_DIR, cls.ANALYSIS_DIR]:
+        for path in [
+            cls.VIDEOS_DIR,
+            cls.TRANSCRIPTS_DIR,
+            cls.ANALYSIS_DIR,
+            cls.LOGS_DIR,
+            cls.RUNTIME_DIR,
+        ]:
             path.mkdir(parents=True, exist_ok=True)
     
     @classmethod

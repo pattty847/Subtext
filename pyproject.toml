@@ -21,6 +21,9 @@ dependencies = [
 cuda = [
     "torch",
 ]
+faster = [
+    "faster-whisper",
+]
 
 [tool.uv]
 package = false

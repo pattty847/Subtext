@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.subtext.private-web</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>/Users/copeharder/Programming/Subtext/scripts/start_private_web.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/copeharder/Programming/Subtext</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>SUBTEXT_SERVER_HOST</key>
+    <string>127.0.0.1</string>
+    <key>SUBTEXT_SERVER_PORT</key>
+    <string>8000</string>
+    <key>SUBTEXT_MODEL</key>
+    <string>small.en</string>
+    <key>SUBTEXT_WHISPER_BACKEND</key>
+    <string>auto</string>
+    <key>SUBTEXT_SERVER_KEY</key>
+    <string>REPLACE_WITH_LONG_RANDOM_VALUE</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/copeharder/Programming/Subtext/assets/logs/launchd.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/copeharder/Programming/Subtext/assets/logs/launchd.err.log</string>
+</dict>
+</plist>
