@@ -107,42 +107,56 @@ Subtext/
   assets/          # generated files (videos/transcripts/analysis)
 ```
 
-## Private Web Service (Tailscale)
+## Private Web Service (Tailscale + API Key)
 
-The private service is intended for localhost-only binding on the Mac, then private tailnet access from your iPhone.
+You can run Subtext as an always-online private service on your Mac and securely use it from your phone.
 
-1. Set environment variables:
+### 1) Set service environment variables
 
-   ```bash
-   export SUBTEXT_SERVER_HOST=127.0.0.1
-   export SUBTEXT_SERVER_PORT=8000
-   export SUBTEXT_MODEL=small.en
-   export SUBTEXT_SERVER_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-   ```
+```bash
+export SUBTEXT_SERVER_HOST=127.0.0.1
+export SUBTEXT_SERVER_PORT=8000
+export SUBTEXT_MODEL=small.en
+export SUBTEXT_SERVER_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+```
 
-2. Start the service:
+`SUBTEXT_SERVER_KEY` is your API key / shared secret for remote access.
 
-   ```bash
-   uv run python run_web.py
-   ```
+### 2) Start the web service
 
-3. Health check locally:
+```bash
+uv run python run_web.py
+```
 
-   ```bash
-   curl http://127.0.0.1:8000/health
-   ```
+### 3) Verify locally
 
-4. Publish it privately to your tailnet without opening a public port:
+```bash
+curl http://127.0.0.1:8000/health
+```
 
-   ```bash
-   tailscale serve --bg 8000 http://127.0.0.1:8000
-   ```
+### 4) Publish privately through Tailscale (no public port)
 
-5. Open the Tailnet URL shown by `tailscale serve status` from Safari on your iPhone. Enter the shared key in the page, then either paste a supported media URL or upload a local audio/video file.
+```bash
+tailscale serve --bg 8000 http://127.0.0.1:8000
+```
+
+### 5) Open from your phone
+
+Run:
+
+```bash
+tailscale serve status
+```
+
+Open the listed Tailnet URL in Safari (or any browser) on your iPhone, then enter your `SUBTEXT_SERVER_KEY` when prompted.
+
+### Optional: keep it always online on macOS
+
+Use the included LaunchAgent (`com.subtext.web.plist`) to auto-start Subtext on boot/login so your phone can connect any time.
 
 Important:
-- `http://<tailscale-ip>:8000` requires the app to bind directly to the tailnet address, which conflicts with the stricter localhost-only requirement.
-- The shipped default keeps Subtext on `127.0.0.1` and relies on Tailscale to proxy private traffic in.
+- `http://<tailscale-ip>:8000` requires binding directly to the tailnet address, which conflicts with localhost-only hardening.
+- Recommended setup: keep Subtext bound to `127.0.0.1` and let Tailscale proxy private traffic in.
 
 ## Useful Commands
 
