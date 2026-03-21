@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run the Subtext private transcription service.
+Run the Subtext private web service.
 
 The service binds to localhost only and is meant to be reached through
 Tailscale Serve or another loopback-safe private proxy.

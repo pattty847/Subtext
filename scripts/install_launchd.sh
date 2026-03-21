@@ -1,74 +1,74 @@
 #!/usr/bin/env bash
-# install_launchd.sh — one-shot installer for the Subtext launchd service
-# Usage:  bash scripts/install_launchd.sh [API_KEY]
+# install_launchd.sh — install/update the Subtext private web service LaunchAgent
+# Usage:
+#   bash scripts/install_launchd.sh [SUBTEXT_SERVER_KEY]
 #
 # What it does:
-#   1. Detects the project root and uv binary paths automatically.
-#   2. Substitutes them (plus your API key) into com.subtext.web.plist.
-#   3. Copies the plist to ~/Library/LaunchAgents/ and loads it.
+#   1. Loads scripts/com.subtext.private-web.plist as a template.
+#   2. Rewrites project-specific paths and the shared secret.
+#   3. Installs the LaunchAgent to ~/Library/LaunchAgents/.
+#   4. Bootstraps and kickstarts the service for the current macOS user session.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PLIST_SRC="$PROJECT_ROOT/com.subtext.web.plist"
-PLIST_DST="$HOME/Library/LaunchAgents/com.subtext.web.plist"
-API_KEY="${1:-}"
+PLIST_SRC="$PROJECT_ROOT/scripts/com.subtext.private-web.plist"
+PLIST_DST="$HOME/Library/LaunchAgents/com.subtext.private-web.plist"
+SERVER_KEY="${1:-}"
+USER_DOMAIN="gui/$(id -u)"
 
-# ── Locate uv ────────────────────────────────────────────────────────────────
-UV_PATH="$(command -v uv 2>/dev/null || true)"
-if [[ -z "$UV_PATH" ]]; then
-  echo "ERROR: 'uv' not found on PATH. Install it first:"
-  echo "  curl -Lsf https://astral.sh/uv/install.sh | sh"
+mkdir -p "$HOME/Library/LaunchAgents"
+mkdir -p "$PROJECT_ROOT/assets/logs"
+
+if [[ ! -f "$PLIST_SRC" ]]; then
+  echo "ERROR: template not found: $PLIST_SRC"
   exit 1
 fi
-echo "Found uv at: $UV_PATH"
 
-# ── Build the plist from the template (via plistlib — safe for any key value) ─
-TMP_PLIST="$(mktemp /tmp/com.subtext.web.XXXXXX.plist)"
-python3 - "$PLIST_SRC" "$TMP_PLIST" "$UV_PATH" "$PROJECT_ROOT" "$API_KEY" <<'PYEOF'
-import sys, plistlib, pathlib
+TMP_PLIST="$(mktemp /tmp/com.subtext.private-web.XXXXXX.plist)"
+python3 - "$PLIST_SRC" "$TMP_PLIST" "$PROJECT_ROOT" "$SERVER_KEY" <<'PYEOF'
+import plistlib
+import sys
+from pathlib import Path
 
-src, dst, uv_path, project_root, api_key = sys.argv[1:]
-with open(src, "rb") as f:
-    pl = plistlib.load(f)
+src, dst, project_root, server_key = sys.argv[1:]
+project_root = Path(project_root)
 
-# Fix uv path and working directory
-args = pl.get("ProgramArguments", [])
-pl["ProgramArguments"] = [uv_path if a == "/usr/local/bin/uv" else a for a in args]
-pl["WorkingDirectory"] = project_root
+with open(src, "rb") as handle:
+    pl = plistlib.load(handle)
+
+program_args = pl.get("ProgramArguments", [])
+if len(program_args) >= 2:
+    program_args[1] = str(project_root / "scripts" / "start_private_web.sh")
+pl["ProgramArguments"] = program_args
+pl["WorkingDirectory"] = str(project_root)
+pl["StandardOutPath"] = str(project_root / "assets" / "logs" / "launchd.out.log")
+pl["StandardErrorPath"] = str(project_root / "assets" / "logs" / "launchd.err.log")
 
 env = pl.setdefault("EnvironmentVariables", {})
-if api_key:
-    env["SUBTEXT_API_KEY"] = api_key
-else:
-    env.pop("SUBTEXT_API_KEY", None)
+env["SUBTEXT_SERVER_HOST"] = "127.0.0.1"
+env["SUBTEXT_SERVER_PORT"] = "8000"
+if server_key:
+    env["SUBTEXT_SERVER_KEY"] = server_key
 
-with open(dst, "wb") as f:
-    plistlib.dump(pl, f)
+with open(dst, "wb") as handle:
+    plistlib.dump(pl, handle)
 PYEOF
 
-if [[ -z "$API_KEY" ]]; then
-  echo "No API key given — server will run without authentication."
-fi
-
-# ── Unload existing service if present ───────────────────────────────────────
-if [[ -f "$PLIST_DST" ]]; then
-  echo "Unloading existing service…"
-  launchctl unload "$PLIST_DST" 2>/dev/null || true
-fi
-
-# ── Install and load ──────────────────────────────────────────────────────────
 cp "$TMP_PLIST" "$PLIST_DST"
 rm "$TMP_PLIST"
-launchctl load "$PLIST_DST"
-echo ""
-echo "Service installed and started."
-echo "  Status : launchctl list | grep subtext"
-echo "  Health : curl http://localhost:8765/health"
-echo "  Logs   : tail -f /tmp/subtext-web.log"
-echo "  Errors : tail -f /tmp/subtext-web.err"
-echo ""
 
-# ── Tailscale reminder ───────────────────────────────────────────────────────
-TS_IP="$(tailscale ip -4 2>/dev/null || echo '<tailscale-ip>')"
-echo "Tailscale endpoint: http://$TS_IP:8765/api/quick"
+launchctl bootout "$USER_DOMAIN" "$PLIST_DST" 2>/dev/null || true
+launchctl bootstrap "$USER_DOMAIN" "$PLIST_DST"
+launchctl kickstart -k "$USER_DOMAIN/com.subtext.private-web"
+
+echo ""
+echo "Subtext private web service LaunchAgent installed."
+echo "  LaunchAgent : $PLIST_DST"
+echo "  Health      : curl http://127.0.0.1:8000/health"
+echo "  Logs        : tail -f \"$PROJECT_ROOT/assets/logs/private_web.log\""
+echo "  Stdout      : tail -f \"$PROJECT_ROOT/assets/logs/launchd.out.log\""
+echo "  Stderr      : tail -f \"$PROJECT_ROOT/assets/logs/launchd.err.log\""
+echo ""
+echo "If you want iPhone access, publish it privately with:"
+echo "  tailscale serve --bg 8000 http://127.0.0.1:8000"

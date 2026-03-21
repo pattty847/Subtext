@@ -1,1 +1,1 @@
-# Web UI for Subtext (network-accessible transcript service)
+# Private web service for Subtext

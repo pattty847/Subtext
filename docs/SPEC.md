@@ -1,41 +1,63 @@
-# Subtext - Lightweight Spec
+# Subtext - Product Spec
 
 ## Core Vision
-A beautiful, modern desktop app that transforms video content into actionable insights through transcription and AI analysis.
 
-## Key Components
+Subtext is a local-first media toolkit with two companion modes:
 
-### 1. Core Engine (`src/core/`)
-- **Downloader**: YouTube video download (yt-dlp wrapper)
-- **Transcriber**: Audio → text (Whisper integration) 
-- **Analyzer**: Text → insights (Ollama integration)
+- a private web service for iPhone/browser download and transcription over Tailscale
+- a desktop workstation for transcript review, Ollama analysis, and export
 
-### 2. Modern UI (`src/ui/`)
-- **Main Window**: Tabbed interface with modern styling
-- **Download Tab**: URL input, progress tracking, settings
-- **Analysis Tab**: AI-powered text analysis with live results
-- **Results Tab**: Export, share, and manage processed content
+## Product Modes
 
-### 3. AI Features
-- **Smart Summaries**: Key points extraction
-- **Quote Mining**: Most interesting/quotable moments
-- **Topic Analysis**: Automatic categorization
-- **Sentiment Tracking**: Emotional flow through content
-- **Custom Prompts**: User-defined analysis types
+### 1. Private Web Service
+
+- Paste a supported media URL
+- Download the original video to the phone
+- Transcribe a URL or uploaded local media file
+- Reach the service privately through Tailscale
+
+### 2. Desktop App
+
+- Queue URLs and local files
+- Generate transcripts with captions-first + Whisper fallback
+- Review and edit transcripts
+- Run AI analysis locally with Ollama
+- Export results in multiple formats
+
+## Shared Core Engine (`src/core/`)
+
+- **Downloader**: media retrieval and YouTube caption handling
+- **Transcriber**: Whisper transcription
+- **Analyzer**: Ollama-powered analysis for desktop workflows
+- **Processor**: orchestration across download, transcription, and fallback paths
 
 ## Design Principles
-- **Sleek & Modern**: Dark theme by default, clean typography
-- **Responsive**: Real-time feedback and progress indication  
-- **Intuitive**: One-click workflows with smart defaults
-- **Extensible**: Plugin architecture for custom analyzers
 
-## MVP Workflow
-1. Paste YouTube URL
-2. Download & transcribe (with progress)
-3. AI analysis with live streaming results
-4. Export in multiple formats
+- **Local-first**: keep media processing and AI workflows on the user’s machine
+- **Private by default**: remote access goes through Tailscale, not open internet exposure
+- **Fast enough to feel personal**: warm-model web service for repeat iPhone use
+- **Clear mode boundaries**: remote convenience in web mode, deeper AI/export workflows in desktop mode
+
+## Primary Workflows
+
+### iPhone / Browser Workflow
+
+1. Open the private Subtext URL through Tailscale
+2. Paste a URL or upload a file
+3. Transcribe media or download the original video
+
+### Desktop Workflow
+
+1. Paste or import media locally
+2. Download and transcribe
+3. Review the transcript
+4. Run Ollama analysis
+5. Export results
 
 ## Tech Choices
-- **PySide6**: Native performance, modern Qt widgets
-- **Ollama**: Privacy-first local LLM processing
-- **Modern Python**: Type hints, async/await, dataclasses
+
+- **FastAPI**: private web service
+- **PySide6**: desktop application
+- **yt-dlp**: media download and extraction
+- **Whisper / faster-whisper**: transcription
+- **Ollama**: local AI analysis

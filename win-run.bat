@@ -21,23 +21,24 @@ if not exist ".venv" (
 )
 
 echo.
-echo  [1] Desktop   - full app on this computer
-echo  [2] Web       - browser UI (this PC + same Wi-Fi devices)
+echo  [1] Desktop app         - full local workflow with AI analysis
+echo  [2] Private web service - localhost service for browser/Tailscale use
 echo.
 set /p pick="Choose 1 or 2: "
 
 if "%pick%"=="2" (
     echo.
-    echo Starting Web UI... Open http://127.0.0.1:8765 in your browser.
-    echo From phone/tablet on same Wi-Fi: http://YOUR_PC_IP:8765
+    echo Starting private web service...
+    echo Local check: http://127.0.0.1:8000
+    echo For phone access, pair it with Tailscale Serve.
     echo.
     uv run python run_web.py
 ) else (
     if not "%pick%"=="1" (
-        echo Unknown option. Starting Desktop.
+        echo Unknown option. Starting Desktop app.
         echo.
     )
-    echo Launching Subtext (Desktop)...
+    echo Launching Subtext Desktop app...
     uv run python run.py
 )
 
