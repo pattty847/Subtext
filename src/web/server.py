@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
+import mimetypes
 import os
 import secrets
 import time
@@ -19,8 +20,9 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 
 from src.config.paths import ProjectPaths
 from src.core.downloader import UniversalDownloader
@@ -226,8 +228,11 @@ def _token_allowed(request: Request, config: ServiceConfig) -> bool:
     if not config.server_key:
         return False
 
-    header_value = request.headers.get("x-subtext-key", "")
-    return secrets.compare_digest(header_value, config.server_key)
+    candidate_values = [
+        request.headers.get("x-subtext-key", ""),
+        request.cookies.get("subtext_key", ""),
+    ]
+    return any(secrets.compare_digest(value, config.server_key) for value in candidate_values if value)
 
 
 @asynccontextmanager
@@ -333,6 +338,29 @@ async def health(request: Request) -> dict[str, str]:
         "backend": service.transcriber.backend,
         "device": service.transcriber.device,
     }
+
+
+@app.post("/download-video")
+async def download_video(
+    request: Request,
+    url: str = Form(default=""),
+) -> FileResponse:
+    cleaned_url = url.strip()
+    if not cleaned_url:
+        raise HTTPException(status_code=400, detail="URL is required.")
+
+    service: PrivateTranscriptionService = request.app.state.service
+    async with service._lock:
+        downloaded_path = await service.downloader.download_best_video(cleaned_url)
+    media_type, _ = mimetypes.guess_type(downloaded_path.name)
+    LOGGER.info("download_only filename=%s size=%s", downloaded_path.name, downloaded_path.stat().st_size)
+
+    return FileResponse(
+        path=downloaded_path,
+        media_type=media_type or "application/octet-stream",
+        filename=downloaded_path.name,
+        background=BackgroundTask(lambda: downloaded_path.unlink(missing_ok=True)),
+    )
 
 
 @app.post("/transcribe")

@@ -11,7 +11,7 @@
     <section class="hero">
       <p class="eyebrow">Private Tailnet Transcription</p>
       <h1>Subtext</h1>
-      <p class="lede">Upload or record a short audio clip from your iPhone and get the transcript back from your Mac.</p>
+      <p class="lede">Paste a media URL or upload a local file from your iPhone. Transcribe it, or download the original video straight to the device.</p>
     </section>
 
     <section class="card">
@@ -33,7 +33,10 @@
           <input id="file-input" type="file" accept="audio/*,video/*,.wav,.m4a,.mp3,.aac,.flac,.ogg,.opus,.webm,.mp4,.mov,.m4v,.avi,.mkv">
         </label>
 
-        <button id="submit-btn" class="button button-primary" type="submit">Transcribe</button>
+        <div class="button-row">
+          <button id="submit-btn" class="button button-primary" type="submit">Transcribe</button>
+          <button id="download-btn" class="button button-secondary" type="button">Download Video Only</button>
+        </div>
       </form>
     </section>
 

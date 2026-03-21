@@ -95,8 +95,8 @@ AnalysisTab.analysis_completed -> MainWindow -> ResultsTab.load_results
 
 ## Web Layer (`src/web`)
 
-- `server.py`: FastAPI private service; POST `/transcribe` for synchronous URL or upload transcription, GET `/health` for health checks. URL requests use `yt-dlp` download flow, uploaded media is transcribed directly, Whisper loads once at startup, inference is serialized behind an async lock, and each request is logged.
-- `static/`: Mobile-first page for iPhone Safari/Shortcuts workflows. Supports a media URL or local audio/video upload.
+- `server.py`: FastAPI private service; POST `/transcribe` for synchronous URL or upload transcription, POST `/download-video` for attachment-style media download, and GET `/health` for health checks. URL requests use `yt-dlp` download flow, uploaded media is transcribed directly, Whisper loads once at startup, inference is serialized behind an async lock, and each request is logged.
+- `static/`: Mobile-first page for iPhone Safari/Shortcuts workflows. Supports a media URL or local audio/video upload, plus URL-only download mode for saving video to the phone.
 - Launched with `run_web.py` (uvicorn on `127.0.0.1:8000` by default). Intended to sit behind Tailscale Serve or another loopback-only private proxy instead of binding to all interfaces.
 
 ## Current Directory Layout

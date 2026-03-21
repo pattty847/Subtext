@@ -149,6 +149,10 @@ tailscale serve status
 ```
 
 Open the listed Tailnet URL in Safari (or any browser) on your iPhone, then enter your `SUBTEXT_SERVER_KEY` when prompted.
+From there you can:
+- paste a supported media URL and transcribe it
+- paste a supported media URL and use `Download Video Only` to save the highest-quality video Safari will accept
+- upload a local audio/video file for transcription
 
 ### Optional: keep it always online on macOS
 

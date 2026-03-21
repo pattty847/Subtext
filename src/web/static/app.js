@@ -5,6 +5,7 @@
   const urlInput = document.getElementById('url-input');
   const fileInput = document.getElementById('file-input');
   const submitBtn = document.getElementById('submit-btn');
+  const downloadBtn = document.getElementById('download-btn');
   const statusCard = document.getElementById('status-card');
   const statusText = document.getElementById('status-text');
   const resultCard = document.getElementById('result-card');
@@ -35,6 +36,19 @@
 
   function setBusy(isBusy) {
     submitBtn.disabled = isBusy;
+    downloadBtn.disabled = isBusy;
+  }
+
+  function persistKey(value) {
+    const trimmedValue = value.trim();
+    localStorage.setItem(STORAGE_KEY, trimmedValue);
+
+    const encodedValue = encodeURIComponent(trimmedValue);
+    if (trimmedValue) {
+      document.cookie = 'subtext_key=' + encodedValue + '; path=/; max-age=31536000; samesite=lax';
+      return;
+    }
+    document.cookie = 'subtext_key=; path=/; max-age=0; samesite=lax';
   }
 
   function flashCopyState(label) {
@@ -64,9 +78,10 @@
   }
 
   apiKeyInput.value = localStorage.getItem(STORAGE_KEY) || '';
+  persistKey(apiKeyInput.value);
 
   apiKeyInput.addEventListener('input', function () {
-    localStorage.setItem(STORAGE_KEY, apiKeyInput.value.trim());
+    persistKey(apiKeyInput.value);
   });
 
   urlInput.addEventListener('input', function () {
@@ -137,6 +152,46 @@
     } finally {
       setBusy(false);
     }
+  });
+
+  downloadBtn.addEventListener('click', function () {
+    hideResult();
+
+    const url = urlInput.value.trim();
+    const file = fileInput.files[0] || null;
+    if (!url) {
+      showStatus('Paste a media URL to download.');
+      return;
+    }
+
+    if (file) {
+      showStatus('Download mode uses a URL only. Clear the file first.');
+      return;
+    }
+
+    const key = apiKeyInput.value.trim();
+    if (!key) {
+      showStatus('Enter the shared key first.');
+      return;
+    }
+
+    persistKey(key);
+    showStatus('Preparing download...');
+
+    const tempForm = document.createElement('form');
+    tempForm.method = 'POST';
+    tempForm.action = '/download-video';
+    tempForm.style.display = 'none';
+
+    const urlField = document.createElement('input');
+    urlField.type = 'hidden';
+    urlField.name = 'url';
+    urlField.value = url;
+    tempForm.appendChild(urlField);
+
+    document.body.appendChild(tempForm);
+    tempForm.submit();
+    document.body.removeChild(tempForm);
   });
 
   copyBtn.addEventListener('click', function () {

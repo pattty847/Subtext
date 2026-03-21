@@ -1,15 +1,14 @@
 """
-Modern YouTube downloader with progress tracking
+Modern yt-dlp downloader with progress tracking.
 """
 import asyncio
 import html
 import os
 import re
-import subprocess
-import tempfile
 import time
 from pathlib import Path
 from typing import Callable, Optional
+
 import yt_dlp
 from yt_dlp.utils import DownloadError
 
@@ -262,10 +261,65 @@ class UniversalDownloader:
             )
         raise Exception(f"YouTube captions unavailable: {msg}")
 
-    async def download(self, url: str, progress_callback: Optional[Callable[[DownloadProgress], None]] = None) -> Path:
-        """Download video and return path to downloaded file"""
-        
-        # Configure yt-dlp options
+    @staticmethod
+    def _resolve_downloaded_path(download_dir: Path, info: dict, fallback_path: Path) -> Path:
+        """Find the final media path after yt-dlp post-processing."""
+        requested_downloads = info.get("requested_downloads") or []
+        for item in requested_downloads:
+            filepath = item.get("filepath")
+            if filepath:
+                candidate = Path(filepath)
+                if candidate.exists():
+                    return candidate
+
+        requested_formats = info.get("requested_formats") or []
+        for item in requested_formats:
+            filepath = item.get("filepath")
+            if filepath:
+                candidate = Path(filepath)
+                if candidate.exists():
+                    return candidate
+
+        if fallback_path.exists():
+            return fallback_path
+
+        stem_matches = sorted(
+            download_dir.glob(f"{fallback_path.stem}.*"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        for candidate in stem_matches:
+            if candidate.exists():
+                return candidate
+
+        raise FileNotFoundError("yt-dlp completed but output file could not be found.")
+
+    async def _download_with_options(
+        self,
+        url: str,
+        ydl_opts: dict,
+    ) -> Path:
+        """Run yt-dlp in a worker thread and return the final media path."""
+        loop = asyncio.get_event_loop()
+
+        def _download() -> Path:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                prepared_path = Path(ydl.prepare_filename(info))
+                return self._resolve_downloaded_path(self.output_dir, info, prepared_path)
+
+        try:
+            return await loop.run_in_executor(None, _download)
+        except Exception as e:
+            raise Exception(f"Download failed: {str(e)}")
+
+    async def download(
+        self,
+        url: str,
+        progress_callback: Optional[Callable[[DownloadProgress], None]] = None,
+    ) -> Path:
+        """Download media for transcription and return the local file path."""
+
         ydl_opts = {
             'format': 'best[ext=mp4]/best',
             'outtmpl': str(self.output_dir / '%(title).80B [%(id)s].%(ext)s'),
@@ -274,24 +328,33 @@ class UniversalDownloader:
             'progress_hooks': [lambda d: self._progress_hook(d, progress_callback)],
             'quiet': True,
             'no_warnings': True,
-            'no_color': True,  # Disable ANSI color codes
+            'no_color': True,
         }
-        
-        # Run download in thread to avoid blocking UI
-        loop = asyncio.get_event_loop()
-        
-        def _download():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                # Get the actual filename
-                filename = ydl.prepare_filename(info)
-                return Path(filename)
-        
-        try:
-            filepath = await loop.run_in_executor(None, _download)
-            return filepath
-        except Exception as e:
-            raise Exception(f"Download failed: {str(e)}")
+        return await self._download_with_options(url, ydl_opts)
+
+    async def download_best_video(
+        self,
+        url: str,
+        progress_callback: Optional[Callable[[DownloadProgress], None]] = None,
+    ) -> Path:
+        """Download highest quality video with Safari-friendly MP4 preference."""
+
+        ydl_opts = {
+            'format': (
+                'bestvideo*[ext=mp4]+bestaudio[ext=m4a]/'
+                'best[ext=mp4]/'
+                'bestvideo*+bestaudio/best'
+            ),
+            'merge_output_format': 'mp4',
+            'outtmpl': str(self.output_dir / '%(title).80B [%(id)s].%(ext)s'),
+            'restrictfilenames': True,
+            'windowsfilenames': True,
+            'progress_hooks': [lambda d: self._progress_hook(d, progress_callback)],
+            'quiet': True,
+            'no_warnings': True,
+            'no_color': True,
+        }
+        return await self._download_with_options(url, ydl_opts)
 
 
 async def test_downloader():
