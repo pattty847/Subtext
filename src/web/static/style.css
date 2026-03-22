@@ -1,14 +1,15 @@
 :root {
-  --bg: #f3efe6;
-  --paper: rgba(255, 252, 247, 0.88);
-  --paper-strong: #fffaf1;
-  --text: #1f1d1a;
-  --muted: #6a645b;
-  --accent: #bf5a36;
-  --accent-dark: #8e3f23;
-  --line: rgba(54, 40, 24, 0.12);
-  --shadow: 0 22px 55px rgba(85, 52, 28, 0.12);
-  --radius: 22px;
+  --bg: #0b0f14;
+  --paper: rgba(18, 24, 32, 0.78);
+  --paper-strong: rgba(13, 18, 25, 0.95);
+  --text: #e8eef7;
+  --muted: #94a3b8;
+  --accent: #4f8cff;
+  --accent-dark: #2d6cdf;
+  --line: rgba(148, 163, 184, 0.24);
+  --line-strong: rgba(148, 163, 184, 0.36);
+  --shadow: 0 24px 70px rgba(2, 8, 20, 0.55);
+  --radius: 20px;
   --font: "Avenir Next", "Segoe UI", sans-serif;
 }
 
@@ -22,9 +23,9 @@ body {
   font-family: var(--font);
   color: var(--text);
   background:
-    radial-gradient(circle at top left, rgba(191, 90, 54, 0.18), transparent 36%),
-    radial-gradient(circle at bottom right, rgba(214, 188, 129, 0.34), transparent 30%),
-    linear-gradient(180deg, #f7f2e8 0%, #efe5d4 100%);
+    radial-gradient(circle at 12% -8%, rgba(79, 140, 255, 0.22), transparent 42%),
+    radial-gradient(circle at 88% 108%, rgba(56, 189, 248, 0.16), transparent 40%),
+    linear-gradient(180deg, #080c12 0%, #0b0f14 48%, #0a0e13 100%);
 }
 
 .shell {
@@ -42,7 +43,7 @@ body {
   font-size: 0.75rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--accent-dark);
+  color: #8fb8ff;
 }
 
 .hero h1 {
@@ -61,7 +62,7 @@ body {
 .card {
   margin-top: 16px;
   padding: 20px;
-  background: var(--paper);
+  background: linear-gradient(180deg, rgba(20, 26, 35, 0.86), rgba(15, 20, 28, 0.82));
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -97,28 +98,35 @@ button {
 
 input[type="password"],
 input[type="file"],
-textarea {
+textarea,
+input[type="url"] {
   width: 100%;
   padding: 14px 16px;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 14px;
   background: var(--paper-strong);
   color: var(--text);
 }
 
+input::placeholder,
+textarea::placeholder {
+  color: #7b889a;
+}
+
 input[type="password"]:focus,
+input[type="url"]:focus,
 textarea:focus {
-  outline: 2px solid rgba(191, 90, 54, 0.24);
-  border-color: rgba(191, 90, 54, 0.35);
+  outline: 1px solid rgba(79, 140, 255, 0.48);
+  border-color: rgba(79, 140, 255, 0.72);
 }
 
 .button {
   min-height: 52px;
   padding: 14px 18px;
-  border: 0;
-  border-radius: 999px;
+  border: 1px solid transparent;
+  border-radius: 12px;
   cursor: pointer;
-  transition: transform 0.18s ease, opacity 0.18s ease, background 0.18s ease;
+  transition: transform 0.18s ease, opacity 0.18s ease, background 0.18s ease, border-color 0.18s ease;
 }
 
 .button:disabled {
@@ -131,14 +139,15 @@ textarea:focus {
 }
 
 .button-primary {
-  background: linear-gradient(135deg, var(--accent) 0%, #cf7b45 100%);
-  color: #fffaf6;
+  background: linear-gradient(135deg, var(--accent) 0%, #38bdf8 100%);
+  color: #eaf4ff;
+  border-color: rgba(111, 168, 255, 0.55);
 }
 
 .button-secondary {
-  background: rgba(255, 250, 241, 0.9);
+  background: rgba(17, 23, 31, 0.82);
   color: var(--text);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
 }
 
 .button-row {
@@ -160,8 +169,9 @@ textarea:focus {
   min-height: 36px;
   padding: 8px 12px;
   border-radius: 999px;
-  background: rgba(191, 90, 54, 0.12);
-  color: var(--accent-dark);
+  background: rgba(79, 140, 255, 0.16);
+  color: #b5ccff;
+  border: 1px solid rgba(79, 140, 255, 0.32);
   font-size: 0.88rem;
 }
 
