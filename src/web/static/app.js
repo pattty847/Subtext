@@ -1,6 +1,8 @@
 (function () {
   const STORAGE_KEY = 'subtext-private-key';
   const form = document.getElementById('transcribe-form');
+  const serviceMetaCard = document.getElementById('service-meta-card');
+  const serviceMetaText = document.getElementById('service-meta-text');
   const apiKeyInput = document.getElementById('api-key');
   const urlInput = document.getElementById('url-input');
   const fileInput = document.getElementById('file-input');
@@ -37,6 +39,26 @@
   function setBusy(isBusy) {
     submitBtn.disabled = isBusy;
     downloadBtn.disabled = isBusy;
+  }
+
+  async function loadServiceMeta() {
+    try {
+      const response = await fetch('/health', { method: 'GET' });
+      if (!response.ok) {
+        throw new Error('health check failed');
+      }
+
+      const payload = await response.json();
+      const model = payload.model || 'unknown';
+      const backend = payload.backend || 'unknown';
+      const device = payload.device || 'unknown';
+
+      serviceMetaText.textContent = 'Service ready • model: ' + model + ' • backend: ' + backend + ' • device: ' + device;
+      serviceMetaCard.classList.remove('hidden');
+    } catch (_) {
+      serviceMetaText.textContent = 'Service status unavailable. You can still try transcribing.';
+      serviceMetaCard.classList.remove('hidden');
+    }
   }
 
   function persistKey(value) {
@@ -79,6 +101,7 @@
 
   apiKeyInput.value = localStorage.getItem(STORAGE_KEY) || '';
   persistKey(apiKeyInput.value);
+  loadServiceMeta();
 
   apiKeyInput.addEventListener('input', function () {
     persistKey(apiKeyInput.value);
