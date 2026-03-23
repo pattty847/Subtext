@@ -5,6 +5,7 @@
 Subtext is a local-first media toolkit with two companion modes:
 
 - a private web service for iPhone/browser download and transcription over Tailscale
+- a private web service for iPhone/browser download, transcription, and preset transcript analysis over Tailscale
 - a desktop workstation for transcript review, Ollama analysis, and export
 
 ## Product Modes
@@ -14,6 +15,7 @@ Subtext is a local-first media toolkit with two companion modes:
 - Paste a supported media URL
 - Download the original video to the phone
 - Transcribe a URL or uploaded local media file
+- Run preset transcript analysis modes like caption ideas, hook rewrites, title packs, and custom prompts
 - Reach the service privately through Tailscale
 
 ### 2. Desktop App
@@ -28,7 +30,7 @@ Subtext is a local-first media toolkit with two companion modes:
 
 - **Downloader**: media retrieval and YouTube caption handling
 - **Transcriber**: Whisper transcription
-- **Analyzer**: Ollama-powered analysis for desktop workflows
+- **Analyzer**: Ollama-powered shared analysis for desktop workflows and web presets
 - **Processor**: orchestration across download, transcription, and fallback paths
 
 ## Design Principles
@@ -36,7 +38,7 @@ Subtext is a local-first media toolkit with two companion modes:
 - **Local-first**: keep media processing and AI workflows on the user’s machine
 - **Private by default**: remote access goes through Tailscale, not open internet exposure
 - **Fast enough to feel personal**: warm-model web service for repeat iPhone use
-- **Clear mode boundaries**: remote convenience in web mode, deeper AI/export workflows in desktop mode
+- **Clear mode boundaries**: remote convenience plus lightweight preset analysis in web mode, deeper editing/export workflows in desktop mode
 
 ## Primary Workflows
 
@@ -45,6 +47,7 @@ Subtext is a local-first media toolkit with two companion modes:
 1. Open the private Subtext URL through Tailscale
 2. Paste a URL or upload a file
 3. Transcribe media or download the original video
+4. Optionally run transcript analysis presets in-page
 
 ### Desktop Workflow
 

@@ -58,6 +58,50 @@
         <button id="copy-btn" class="button button-secondary" type="button">Copy</button>
       </div>
     </section>
+
+    <section id="analysis-card" class="card hidden">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow eyebrow-small">Transcript Analysis</p>
+          <h2>Turn the transcript into ideas</h2>
+        </div>
+      </div>
+
+      <div class="stack">
+        <label class="field">
+          <span>Analysis preset</span>
+          <select id="preset-select"></select>
+        </label>
+
+        <label class="field">
+          <span>Humor style</span>
+          <select id="style-select"></select>
+        </label>
+
+        <label class="field">
+          <span>AI model</span>
+          <select id="analysis-model-select"></select>
+        </label>
+
+        <label id="custom-prompt-field" class="field hidden">
+          <span>Custom prompt</span>
+          <textarea id="custom-prompt-input" placeholder="Ask for anything grounded in the transcript, like: pull out the three funniest moments and explain why they work."></textarea>
+        </label>
+
+        <div class="button-row">
+          <button id="analyze-btn" class="button button-primary" type="button">Analyze Transcript</button>
+          <button id="clear-analysis-btn" class="button button-secondary" type="button">Clear Analysis</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="analysis-result-card" class="card hidden" aria-live="polite">
+      <div class="result-meta">
+        <span id="analysis-meta-pill" class="pill">Preset: Caption Ideas</span>
+      </div>
+      <div id="analysis-digest" class="analysis-digest hidden"></div>
+      <div id="analysis-items" class="analysis-items"></div>
+    </section>
   </main>
 
   <script src="/static/app.js"></script>

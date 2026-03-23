@@ -7,7 +7,7 @@ This document describes the current structure and data flow of Subtext.
 Subtext is one local-first project with two companion modes:
 
 - a **Desktop app** built with PySide6 for transcript review, Ollama analysis, and export
-- a **Private web service** built with FastAPI for Tailscale-accessible download/transcribe workflows from a phone or browser
+- a **Private web service** built with FastAPI for Tailscale-accessible download/transcribe/analyze workflows from a phone or browser
 
 High-level flow:
 
@@ -30,7 +30,7 @@ Input URLs/files -> Download/Captions -> Transcription -> LLM Analysis -> Export
 - `input_processor.py`: parse/validate mixed URL + file input
 - `downloader.py`: media downloads + YouTube caption retrieval and parsing
 - `transcriber.py`: Whisper model loading/transcription/saving
-- `analyzer.py`: Ollama model management + analysis prompts
+- `analyzer.py`: shared Ollama model management + transcript analysis presets
 - `processor.py`: orchestration across downloader/transcriber with fallback paths
 
 ## Config Layer (`src/config`)
@@ -73,12 +73,14 @@ Notes:
    - quotes
    - topics
    - sentiment
-3. Populate `AnalysisResult`
-4. Emit to Results tab
+3. For preset analysis, build a grounded transcript digest and then run preset-specific generation
+4. Populate `AnalysisResult` for desktop or structured preset JSON for web
+5. Emit to Results tab or return API response
 
 Memory behavior:
 - Ollama requests use `keep_alive="0s"` to release model memory between calls.
 - Analysis is sequential to reduce RAM spikes.
+- The private web service shares one heavy-work lock across transcription and analysis to avoid Whisper + Ollama overlap on smaller machines.
 
 ## Export Pipeline
 
@@ -98,13 +100,13 @@ AnalysisTab.analysis_completed -> MainWindow -> ResultsTab.load_results
 
 ## Web Layer (`src/web`)
 
-- `server.py`: FastAPI private service; POST `/transcribe` for synchronous URL or upload transcription, POST `/download-video` for attachment-style media download, and GET `/health` for health checks. URL requests use `yt-dlp` download flow, uploaded media is transcribed directly, Whisper loads once at startup, inference is serialized behind an async lock, and each request is logged.
-- `static/`: Mobile-first page for iPhone Safari/Shortcuts workflows. Supports a media URL or local audio/video upload, plus URL-only download mode for saving video to the phone.
+- `server.py`: FastAPI private service; POST `/transcribe` for synchronous URL or upload transcription, POST `/download-video` for attachment-style media download, POST `/analyze` for on-demand transcript analysis, GET `/analysis/meta` for preset/model metadata, and GET `/health` for health checks. URL requests use `yt-dlp` download flow, uploaded media is transcribed directly, Whisper loads once at startup, and all heavy work is serialized behind one async lock.
+- `static/`: Mobile-first page for iPhone Safari/Shortcuts workflows. Supports a media URL or local audio/video upload, URL-only download mode for saving video to the phone, and on-page transcript analysis presets after a transcript is available.
 - Launched with `run_web.py` (uvicorn on `127.0.0.1:8000` by default). Intended to sit behind Tailscale Serve or another loopback-only private proxy instead of binding to all interfaces.
 
 Mode boundary:
 - The private web service focuses on download/transcribe convenience for remote browser use.
-- Ollama analysis, transcript editing, and export workflows remain in the Desktop app.
+- The private web service now includes preset transcript analysis, while transcript editing and export workflows remain in the Desktop app.
 
 ## Current Directory Layout
 

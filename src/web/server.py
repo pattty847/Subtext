@@ -17,14 +17,22 @@ import uuid
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Optional
+from typing import Any, List, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
 from src.config.paths import ProjectPaths
+from src.core.analyzer import (
+    DEFAULT_ANALYSIS_MODEL,
+    DEFAULT_HUMOR_STYLE,
+    DEFAULT_PRESET,
+    MODEL_FALLBACKS,
+    OllamaAnalyzer,
+)
 from src.core.downloader import UniversalDownloader
 from src.core.transcriber import WhisperTranscriber
 
@@ -64,6 +72,7 @@ class ServiceConfig:
 
         self.backend = os.getenv("SUBTEXT_WHISPER_BACKEND", "auto").strip() or "auto"
         self.compute_type = os.getenv("SUBTEXT_COMPUTE_TYPE", "").strip() or None
+        self.analysis_model = os.getenv("SUBTEXT_ANALYSIS_MODEL", DEFAULT_ANALYSIS_MODEL).strip() or DEFAULT_ANALYSIS_MODEL
         self.server_key = os.getenv("SUBTEXT_SERVER_KEY", "").strip()
         self.allow_tailscale_ips = _env_flag("SUBTEXT_ALLOW_TAILSCALE_IPS", False)
         self.allowed_ips = {
@@ -72,6 +81,29 @@ class ServiceConfig:
             if entry.strip()
         }
         self.trust_proxy_headers = _env_flag("SUBTEXT_TRUST_PROXY_HEADERS", False)
+        preferred_models_env = os.getenv("SUBTEXT_ANALYSIS_PREFERRED_MODELS", "").strip()
+        if preferred_models_env:
+            self.preferred_analysis_models = [
+                value.strip() for value in preferred_models_env.split(",") if value.strip()
+            ]
+        else:
+            self.preferred_analysis_models = MODEL_FALLBACKS.copy()
+
+
+class AnalyzeRequest(BaseModel):
+    transcript: str = Field(min_length=1)
+    preset: str = Field(default=DEFAULT_PRESET)
+    humor_style: str = Field(default=DEFAULT_HUMOR_STYLE)
+    model: Optional[str] = Field(default=None)
+    custom_prompt: str = Field(default="")
+
+
+class AnalysisMetaResponse(BaseModel):
+    default_model: str
+    preferred_models: List[str]
+    available_models: List[str]
+    presets: List[dict[str, str]]
+    humor_styles: List[dict[str, str]]
 
 
 class PrivateTranscriptionService:
@@ -85,6 +117,7 @@ class PrivateTranscriptionService:
             backend=config.backend,
             compute_type=config.compute_type,
         )
+        self.analyzer = OllamaAnalyzer(config.analysis_model)
         self._lock = asyncio.Lock()
 
     async def startup(self) -> None:
@@ -165,6 +198,29 @@ class PrivateTranscriptionService:
                     downloaded_path.unlink(missing_ok=True)
                 except Exception:
                     LOGGER.warning("cleanup_failed path=%s", downloaded_path)
+
+    async def list_analysis_models(self) -> List[str]:
+        return await self.analyzer.list_available_models()
+
+    async def analyze_transcript(
+        self,
+        transcript: str,
+        preset: str,
+        humor_style: str,
+        model: Optional[str] = None,
+        custom_prompt: str = "",
+    ) -> dict[str, Any]:
+        selected_model = (model or self.config.analysis_model).strip() or self.config.analysis_model
+        self.analyzer.model = selected_model
+
+        async with self._lock:
+            result = await self.analyzer.run_preset(
+                transcript=transcript,
+                preset_name=preset,
+                humor_style=humor_style,
+                custom_prompt=custom_prompt,
+            )
+        return result.to_dict()
 
 
 def _configure_logging() -> None:
@@ -337,7 +393,61 @@ async def health(request: Request) -> dict[str, str]:
         "model": service.transcriber.model_name,
         "backend": service.transcriber.backend,
         "device": service.transcriber.device,
+        "analysis_model": service.config.analysis_model,
     }
+
+
+@app.get("/analysis/meta", response_model=AnalysisMetaResponse)
+async def analysis_meta(request: Request) -> AnalysisMetaResponse:
+    service: PrivateTranscriptionService = request.app.state.service
+    available_models = await service.list_analysis_models()
+
+    preferred_models: List[str] = []
+    seen: set[str] = set()
+    for name in service.config.preferred_analysis_models + available_models:
+        normalized = name.strip()
+        if normalized and normalized not in seen:
+            preferred_models.append(normalized)
+            seen.add(normalized)
+
+    return AnalysisMetaResponse(
+        default_model=service.config.analysis_model,
+        preferred_models=preferred_models,
+        available_models=available_models,
+        presets=OllamaAnalyzer.get_presets(),
+        humor_styles=OllamaAnalyzer.get_humor_styles(),
+    )
+
+
+@app.post("/analyze")
+async def analyze(
+    request: Request,
+    payload: AnalyzeRequest,
+) -> dict[str, Any]:
+    service: PrivateTranscriptionService = request.app.state.service
+
+    try:
+        result = await service.analyze_transcript(
+            transcript=payload.transcript,
+            preset=payload.preset,
+            humor_style=payload.humor_style,
+            model=payload.model,
+            custom_prompt=payload.custom_prompt,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+    LOGGER.info(
+        "analyzed_transcript preset=%s style=%s model=%s chars=%s items=%s",
+        payload.preset,
+        payload.humor_style,
+        result["model"],
+        len(payload.transcript),
+        len(result.get("items", [])),
+    )
+    return result
 
 
 @app.post("/download-video")
@@ -403,4 +513,4 @@ async def transcribe(
 
 @app.post("/api/transcribe")
 async def api_transcribe(request: Request, file: UploadFile = File(...)) -> dict[str, float | str]:
-    return await transcribe(request, file)
+    return await transcribe(request, file=file)

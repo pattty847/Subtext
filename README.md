@@ -1,12 +1,13 @@
 # Subtext
 
-Subtext is one local-first project with two companion modes: a private iPhone-friendly web service for downloading and transcribing media over Tailscale, and a full desktop app for transcript review, Ollama analysis, and exports.
+Subtext is one local-first project with two companion modes: a private iPhone-friendly web service for downloading, transcribing, and running lightweight transcript analysis over Tailscale, and a full desktop app for transcript review, Ollama analysis, and exports.
 
 ## What Subtext Is
 
 Subtext helps you do two related jobs without sending your media to random web tools:
 
 - **Private web service**: use Safari on your iPhone to paste a URL, upload a file, transcribe media, or download the original video.
+- **Private web service**: use Safari on your iPhone to paste a URL, upload a file, transcribe media, run preset transcript analysis, or download the original video.
 - **Desktop app**: work locally on your Mac or PC with transcript review, AI analysis, and export tools.
 
 ## Choose Your Mode
@@ -16,6 +17,7 @@ Subtext helps you do two related jobs without sending your media to random web t
 Best when you want an always-on personal media tool you can reach from your phone.
 
 - Paste a supported URL and transcribe it
+- Run meme-focused transcript analysis presets from the resulting transcript
 - Paste a supported URL and download the original video
 - Upload a local audio/video file from Safari
 - Reach it privately through Tailscale
@@ -29,7 +31,7 @@ Best when you want the full Subtext workflow on one computer.
 - Review and edit transcripts
 - Run Ollama analysis and export results
 
-Important: the private web service does **not** include the PySide desktop AI analysis/export workflow.
+Important: the private web service now supports preset transcript analysis, but it still does **not** include the full PySide desktop transcript editing or export workflow.
 
 ## Fastest Setup: Mac + iPhone
 
@@ -62,6 +64,7 @@ export SUBTEXT_SERVER_KEY="$(python3 -c 'import secrets; print(secrets.token_url
 export SUBTEXT_SERVER_HOST=127.0.0.1
 export SUBTEXT_SERVER_PORT=8000
 export SUBTEXT_MODEL=small.en
+export SUBTEXT_ANALYSIS_MODEL=gemma3:4b
 ```
 
 `SUBTEXT_SERVER_KEY` is the shared secret your phone sends to the service.
@@ -97,6 +100,7 @@ Open the listed Tailnet URL in Safari on your iPhone and enter your `SUBTEXT_SER
 From Safari on iPhone you can:
 
 - paste a supported media URL and tap `Transcribe`
+- run `Caption Ideas`, `Hook Rewrites`, `Title Pack`, or a custom prompt on the transcript with a selected humor style
 - paste a supported media URL and tap `Download Video Only`
 - upload a local audio/video file and transcribe it
 
@@ -130,7 +134,7 @@ Or use the launchers:
 1. Install Ollama: https://ollama.com/download
 2. Pull a model:
    ```bash
-   ollama pull llama3.2
+   ollama pull gemma3:4b
    ```
 3. In the Desktop app:
    - open the `AI Analysis` tab
@@ -155,6 +159,7 @@ Or use the launchers:
 - URL video download
 - iPhone/Safari access over Tailscale
 - Warm-loaded Whisper model for faster repeat requests
+- On-demand transcript analysis presets with Ollama
 
 ### Desktop App
 
@@ -201,6 +206,7 @@ uv run python run.py
 ## Performance Notes
 
 - `small.en` is the default model because it is a good speed/quality tradeoff for an always-on Apple Silicon service.
+- `gemma3:4b` is the default transcript-analysis model for the private web service and desktop analysis.
 - If installed, `faster-whisper` can be enabled through `uv sync --extra faster`.
 - Whisper device selection is automatic:
   - `cuda` when available
@@ -225,7 +231,7 @@ uv run python run.py
   Retry later, provide cookies if needed, or let Subtext fall back to Whisper.
 
 - **High memory usage:**
-  Use a smaller Whisper model such as `small.en` or `base.en`, and use smaller Ollama models for desktop analysis.
+  Use a smaller Whisper model such as `small.en` or `base.en`, and use smaller Ollama models like `gemma3:4b` for transcript analysis.
 
 ## License
 

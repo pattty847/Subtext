@@ -68,7 +68,7 @@ class AnalysisTab(QWidget):
         model_label = QLabel("AI Model:")
         self.model_combo = QComboBox()
         self.model_combo.setMinimumWidth(190)
-        self.model_combo.addItems(["llama3.2", "llama3.1", "mistral", "phi3"])
+        self.model_combo.addItems(["gemma3:4b", "qwen3:8b", "llama3.1:8b", "llama3.2"])
 
         self.refresh_models_btn = QPushButton("Refresh Models")
         self.refresh_models_btn.setProperty("class", "secondary")
@@ -223,7 +223,7 @@ class AnalysisTab(QWidget):
             self.health_badge.setText(f"LLM: connected ({len(model_names)} model(s))")
             self.health_badge.setProperty("class", "status-success")
         else:
-            fallback = ["llama3.2", "llama3.1", "mistral", "phi3"]
+            fallback = ["gemma3:4b", "qwen3:8b", "llama3.1:8b", "llama3.2"]
             self.model_combo.addItems(fallback)
             if current and current in fallback:
                 self.model_combo.setCurrentText(current)

@@ -5,7 +5,7 @@ import asyncio
 
 from PySide6.QtCore import QThread, Signal
 
-from src.core.analyzer import OllamaAnalyzer
+from src.core.analyzer import DEFAULT_ANALYSIS_MODEL, OllamaAnalyzer
 
 
 class AnalysisWorker(QThread):
@@ -14,7 +14,7 @@ class AnalysisWorker(QThread):
     analysis_completed = Signal(object)  # AnalysisResult
     error_occurred = Signal(str)  # Error message
     
-    def __init__(self, transcript: str, model: str = "llama3.2"):
+    def __init__(self, transcript: str, model: str = DEFAULT_ANALYSIS_MODEL):
         super().__init__()
         self.transcript = transcript
         self.model = model

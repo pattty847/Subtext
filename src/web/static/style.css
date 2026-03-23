@@ -91,6 +91,7 @@ body {
 }
 
 input,
+select,
 textarea,
 button {
   font: inherit;
@@ -98,6 +99,7 @@ button {
 
 input[type="password"],
 input[type="file"],
+select,
 textarea,
 input[type="url"] {
   width: 100%;
@@ -115,6 +117,7 @@ textarea::placeholder {
 
 input[type="password"]:focus,
 input[type="url"]:focus,
+select:focus,
 textarea:focus {
   outline: 1px solid rgba(79, 140, 255, 0.48);
   border-color: rgba(79, 140, 255, 0.72);
@@ -181,8 +184,91 @@ textarea {
   line-height: 1.5;
 }
 
+#custom-prompt-input {
+  min-height: 140px;
+}
+
 .actions {
   margin-top: 14px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.section-head h2 {
+  margin: 2px 0 0;
+  font-size: 1.2rem;
+}
+
+.eyebrow-small {
+  margin-bottom: 4px;
+  font-size: 0.7rem;
+}
+
+.analysis-digest {
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(17, 23, 31, 0.72);
+  color: var(--muted);
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.analysis-items {
+  display: grid;
+  gap: 12px;
+}
+
+.analysis-item {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(17, 23, 31, 0.72);
+}
+
+.analysis-item-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.analysis-item-text {
+  margin: 0 0 12px;
+  font-size: 1.06rem;
+  line-height: 1.45;
+}
+
+.analysis-item-why {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.risk-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.risk-flag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(248, 113, 113, 0.14);
+  color: #fecaca;
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  font-size: 0.82rem;
 }
 
 .meta-card {
