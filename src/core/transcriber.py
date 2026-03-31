@@ -8,7 +8,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import AsyncIterator, Callable, Optional
 
 import whisper
 
@@ -208,7 +208,31 @@ class WhisperTranscriber:
         if self.model is None:
             await self.load_model(progress_callback)
 
-        # Get audio duration for progress estimation
+        # Collect all chunks from the streaming generator and join them
+        chunks: list[str] = []
+        async for chunk in self.transcribe_stream(audio_path, progress_callback):
+            chunks.append(chunk)
+        return self._merge_transcript_chunks(chunks)
+
+    @staticmethod
+    def _merge_transcript_chunks(chunks: list[str]) -> str:
+        merged = " ".join(chunk.strip() for chunk in chunks if chunk and chunk.strip())
+        return merged.strip()
+
+    async def transcribe_stream(
+        self,
+        audio_path: Path,
+        progress_callback: Optional[Callable[[TranscriptionProgress], None]] = None,
+    ) -> AsyncIterator[str]:
+        """
+        Stream transcription chunks as they arrive.
+        Yields text chunks (typically per-segment for faster-whisper).
+        """
+        self._ensure_ffmpeg_available()
+
+        if self.model is None:
+            await self.load_model(progress_callback)
+
         audio_duration = self._get_audio_duration(audio_path)
         start_time = time.time()
         last_progress_update = 0.0
@@ -221,27 +245,58 @@ class WhisperTranscriber:
         if progress_callback:
             progress_callback(progress)
 
+        loop = asyncio.get_running_loop()
+        chunk_queue: asyncio.Queue[str] = asyncio.Queue()
+        error_queue: asyncio.Queue[Exception] = asyncio.Queue()
+
+        def _transcribe_into_queue() -> None:
+            """Run transcription in a worker thread and push chunks to the async queue."""
+            def push_chunk(text: str) -> None:
+                if text:
+                    loop.call_soon_threadsafe(chunk_queue.put_nowait, text)
+
+            try:
+                if self.backend == "faster-whisper":
+                    segments, _info = self.model.transcribe(
+                        str(audio_path),
+                        beam_size=1,
+                        vad_filter=True,
+                        condition_on_previous_text=False,
+                    )
+                    for segment in segments:
+                        text = segment.text.strip()
+                        if text:
+                            push_chunk(text)
+                else:
+                    result_text = self.model.transcribe(
+                        str(audio_path),
+                        fp16=self.use_fp16,
+                        verbose=True,
+                    )["text"].strip()
+                    if result_text:
+                        push_chunk(result_text)
+            except Exception as error:
+                loop.call_soon_threadsafe(error_queue.put_nowait, error)
+            finally:
+                transcription_complete.set()
+
         # Background thread to update progress based on elapsed time
         progress_thread = None
         if progress_callback:
+
             def update_progress_periodically():
                 nonlocal last_progress_update
                 update_count = 0
                 while not transcription_complete.is_set():
                     elapsed = time.time() - start_time
-                    
+
                     if audio_duration > 0:
-                        # Estimate progress: transcription typically takes 2-3x audio duration on GPU
-                        # Use a conservative estimate of 2.5x duration
                         estimated_total_time = audio_duration * 2.5
                         estimated_percent = min(95.0, (elapsed / estimated_total_time) * 100)
                     else:
-                        # Fallback: show indeterminate progress that slowly increases
-                        # Update every 2 seconds, cap at 90% until complete
                         update_count += 1
-                        estimated_percent = min(90.0, update_count * 2.0)  # 2% per update, max 90%
-                    
-                    # Only update if progress increased by at least 0.5%
+                        estimated_percent = min(90.0, update_count * 2.0)
+
                     if estimated_percent - last_progress_update >= 0.5:
                         last_progress_update = estimated_percent
                         progress_obj = TranscriptionProgress()
@@ -253,35 +308,30 @@ class WhisperTranscriber:
                             progress_obj.message = f"Transcribing... ({int(elapsed)}s elapsed)"
                         progress_callback(progress_obj)
 
-                    time.sleep(0.5)  # Update every 500ms
+                    time.sleep(0.5)
 
             progress_thread = threading.Thread(target=update_progress_periodically, daemon=True)
             progress_thread.start()
 
-        loop = asyncio.get_event_loop()
-
-        def _transcribe():
-            if self.backend == "faster-whisper":
-                segments, _info = self.model.transcribe(
-                    str(audio_path),
-                    beam_size=1,
-                    vad_filter=True,
-                    condition_on_previous_text=False,
-                )
-                result = " ".join(segment.text.strip() for segment in segments).strip()
-            else:
-                result = self.model.transcribe(
-                    str(audio_path),
-                    fp16=self.use_fp16,
-                    verbose=True,
-                )["text"].strip()
-            transcription_complete.set()  # Signal that transcription is done
-            return result
+        transcription_future = loop.run_in_executor(None, _transcribe_into_queue)
 
         try:
-            transcript = await loop.run_in_executor(None, _transcribe)
+            while True:
+                if not error_queue.empty():
+                    error = await error_queue.get()
+                    raise error
 
-            # Wait a moment for final progress update
+                try:
+                    chunk = await asyncio.wait_for(chunk_queue.get(), timeout=0.25)
+                    yield chunk
+                except asyncio.TimeoutError:
+                    if transcription_complete.is_set() and chunk_queue.empty():
+                        break
+                    continue
+
+            await transcription_future
+
+            # Wait for final progress update
             if progress_thread:
                 progress_thread.join(timeout=1.0)
 
@@ -291,12 +341,11 @@ class WhisperTranscriber:
             if progress_callback:
                 progress_callback(progress)
 
-            return transcript
-
         except Exception as e:
-            transcription_complete.set()  # Signal error
+            transcription_complete.set()
             if progress_thread:
                 progress_thread.join(timeout=0.5)
+            await asyncio.gather(transcription_future, return_exceptions=True)
             raise Exception(f"Transcription failed: {str(e)}")
 
     async def transcribe_and_save(

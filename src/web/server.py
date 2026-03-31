@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import json
 import logging
 import mimetypes
 import os
@@ -21,7 +22,7 @@ from typing import Any, List, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
@@ -53,6 +54,10 @@ ALLOWED_EXTENSIONS = {
     ".webm",
 }
 WHISPER_MODELS = ["tiny.en", "base.en", "small.en", "medium.en", "large-v3"]
+
+
+def _sse_event(event: str, payload: Any) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -514,3 +519,132 @@ async def transcribe(
 @app.post("/api/transcribe")
 async def api_transcribe(request: Request, file: UploadFile = File(...)) -> dict[str, float | str]:
     return await transcribe(request, file=file)
+
+
+@app.post("/transcribe/stream")
+async def transcribe_stream(request: Request, url: str = Form(default=""), file: Optional[UploadFile] = File(default=None)):
+    """
+    Stream transcription chunks as Server-Sent Events.
+    Yields 'chunk' events with text fragments as they are transcribed.
+    """
+    service: PrivateTranscriptionService = request.app.state.service
+
+    has_url = bool(url.strip())
+    has_file = file is not None and bool(file.filename)
+    if has_url == has_file:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either a Web URL or one uploaded audio/video file.",
+        )
+
+    async def event_stream():
+        started_at = time.perf_counter()
+        loop = asyncio.get_running_loop()
+        progress_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+        def progress_callback(progress) -> None:
+            loop.call_soon_threadsafe(
+                progress_queue.put_nowait,
+                {
+                    "stage": progress.stage,
+                    "percent": round(progress.percent, 1),
+                    "message": progress.message,
+                },
+            )
+
+        async def flush_progress_events() -> list[dict[str, Any]]:
+            events: list[dict[str, Any]] = []
+            while not progress_queue.empty():
+                events.append(await progress_queue.get())
+            return events
+
+        try:
+            if has_url:
+                downloaded_path: Optional[Path] = None
+                try:
+                    async with service._lock:
+                        downloaded_path = await service.downloader.download(url.strip())
+                        duration = service.transcriber.get_audio_duration(downloaded_path)
+
+                        async for text_chunk in service.transcriber.transcribe_stream(
+                            downloaded_path,
+                            progress_callback=progress_callback,
+                        ):
+                            for progress_event in await flush_progress_events():
+                                yield _sse_event("progress", progress_event)
+                            if text_chunk:
+                                yield _sse_event("chunk", {"text": text_chunk})
+
+                    for progress_event in await flush_progress_events():
+                        yield _sse_event("progress", progress_event)
+                    latency = time.perf_counter() - started_at
+                    yield _sse_event(
+                        "done",
+                        {"duration": round(duration, 3), "latency": round(latency, 3)},
+                    )
+                finally:
+                    if downloaded_path:
+                        try:
+                            downloaded_path.unlink(missing_ok=True)
+                        except Exception:
+                            LOGGER.warning("cleanup_failed path=%s", downloaded_path)
+
+            else:
+                assert file is not None
+                suffix = Path(file.filename or "upload.wav").suffix.lower()
+                if suffix not in ALLOWED_EXTENSIONS:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Unsupported file type.",
+                    )
+
+                temp_path = ProjectPaths.RUNTIME_DIR / f"upload_{uuid.uuid4().hex}{suffix}"
+                try:
+                    with temp_path.open("wb") as handle:
+                        while True:
+                            chunk_bytes = await file.read(1024 * 1024)
+                            if not chunk_bytes:
+                                break
+                            handle.write(chunk_bytes)
+
+                    async with service._lock:
+                        duration = service.transcriber.get_audio_duration(temp_path)
+
+                        async for text_chunk in service.transcriber.transcribe_stream(
+                            temp_path,
+                            progress_callback=progress_callback,
+                        ):
+                            for progress_event in await flush_progress_events():
+                                yield _sse_event("progress", progress_event)
+                            if text_chunk:
+                                yield _sse_event("chunk", {"text": text_chunk})
+
+                    for progress_event in await flush_progress_events():
+                        yield _sse_event("progress", progress_event)
+                    latency = time.perf_counter() - started_at
+                    yield _sse_event(
+                        "done",
+                        {"duration": round(duration, 3), "latency": round(latency, 3)},
+                    )
+
+                finally:
+                    await file.close()
+                    try:
+                        temp_path.unlink(missing_ok=True)
+                    except Exception:
+                        LOGGER.warning("cleanup_failed path=%s", temp_path)
+
+        except HTTPException as error:
+            yield _sse_event("error", {"detail": error.detail})
+        except Exception as e:
+            yield _sse_event("error", {"detail": str(e)})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

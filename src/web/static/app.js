@@ -14,7 +14,11 @@
   const transcriptOutput = document.getElementById('transcript-output');
   const durationPill = document.getElementById('duration-pill');
   const latencyPill = document.getElementById('latency-pill');
+  const streamStatusPill = document.getElementById('stream-status-pill');
   const copyBtn = document.getElementById('copy-btn');
+  const streamingCursor = document.getElementById('streaming-cursor');
+  const streamIndicator = document.getElementById('stream-indicator');
+  const streamLabel = document.getElementById('stream-label');
   const analysisCard = document.getElementById('analysis-card');
   const analysisResultCard = document.getElementById('analysis-result-card');
   const presetSelect = document.getElementById('preset-select');
@@ -45,19 +49,47 @@
     statusCard.classList.add('hidden');
   }
 
+  function showStreamIndicator(label) {
+    streamIndicator.classList.remove('hidden');
+    streamLabel.textContent = label || 'Transcribing...';
+  }
+
+  function hideStreamIndicator() {
+    streamIndicator.classList.add('hidden');
+  }
+
   function hideResult() {
     resultCard.classList.add('hidden');
   }
 
-  function showResult(payload) {
+  function showResult(payload, streaming) {
     transcriptOutput.value = payload.text || '';
     durationPill.textContent = 'Duration: ' + Number(payload.duration || 0).toFixed(2) + 's';
     latencyPill.textContent = 'Latency: ' + Number(payload.latency || 0).toFixed(2) + 's';
     resultCard.classList.remove('hidden');
 
+    if (streaming) {
+      streamStatusPill.classList.remove('hidden');
+      streamingCursor.classList.remove('hidden');
+    } else {
+      streamStatusPill.classList.add('hidden');
+      streamingCursor.classList.add('hidden');
+    }
+
     if ((payload.text || '').trim()) {
       analysisCard.classList.remove('hidden');
     }
+  }
+
+  function appendTranscriptChunk(text) {
+    transcriptOutput.value += text;
+    transcriptOutput.scrollTop = transcriptOutput.scrollHeight;
+  }
+
+  function finalizeTranscript() {
+    streamingCursor.classList.add('hidden');
+    streamStatusPill.classList.add('hidden');
+    streamIndicator.classList.add('hidden');
   }
 
   function setBusy(isBusy) {
@@ -363,6 +395,7 @@
     event.preventDefault();
     hideResult();
     resetAnalysisResult();
+    finalizeTranscript();
 
     const url = urlInput.value.trim();
     const file = fileInput.files[0] || null;
@@ -393,25 +426,88 @@
 
     setBusy(true);
     showStatus(url ? 'Downloading and transcribing...' : 'Uploading and transcribing...');
+    showStreamIndicator('Transcribing...');
+    showResult({ text: '', duration: 0, latency: 0 }, true);
 
     try {
-      const response = await fetch('/transcribe', {
+      const response = await fetch('/transcribe/stream', {
         method: 'POST',
         headers: headers,
         body: formData,
       });
 
       if (!response.ok) {
-        const payload = await response.json().catch(function () {
-          return { detail: 'Request failed.' };
-        });
-        throw new Error(payload.detail || 'Request failed.');
+        let detail = 'Request failed.';
+        try {
+          const json = await response.json();
+          detail = json.detail || detail;
+        } catch (_) {}
+        throw new Error(detail);
       }
 
-      const payload = await response.json();
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalPayload = {};
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Process complete events in buffer
+        while (true) {
+          const eventEnd = buffer.indexOf('\n\n');
+          if (eventEnd === -1) break;
+
+          const rawEvent = buffer.slice(0, eventEnd);
+          buffer = buffer.slice(eventEnd + 2);
+
+          const lines = rawEvent.split('\n');
+          let eventType = '';
+          let eventData = '';
+
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              eventType = line.slice(7).trim();
+            } else if (line.startsWith('data: ')) {
+              eventData = line.slice(6);
+            }
+          }
+
+          let parsedData = eventData;
+          if (eventData) {
+            try {
+              parsedData = JSON.parse(eventData);
+            } catch (_) {}
+          }
+
+          if (eventType === 'chunk') {
+            appendTranscriptChunk(parsedData.text || '');
+          } else if (eventType === 'done') {
+            if (parsedData && typeof parsedData === 'object') {
+              finalPayload = parsedData;
+            }
+          } else if (eventType === 'error') {
+            throw new Error((parsedData && parsedData.detail) || 'Stream error.');
+          } else if (eventType === 'progress') {
+            hideStatus();
+            showStreamIndicator(parsedData.message || 'Transcribing...');
+          }
+        }
+      }
+
       hideStatus();
-      showResult(payload);
+      hideStreamIndicator();
+      finalizeTranscript();
+
+      const finalText = transcriptOutput.value;
+      showResult({ text: finalText, ...finalPayload }, false);
     } catch (error) {
+      hideStatus();
+      hideStreamIndicator();
+      finalizeTranscript();
       showStatus(error.message || 'Transcription failed.');
     } finally {
       setBusy(false);

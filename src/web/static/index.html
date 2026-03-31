@@ -46,14 +46,22 @@
 
     <section id="status-card" class="card hidden" aria-live="polite">
       <p id="status-text" class="status-text">Uploading...</p>
+      <div id="stream-indicator" class="stream-indicator hidden">
+        <span class="stream-dot"></span>
+        <span id="stream-label">Transcribing...</span>
+      </div>
     </section>
 
     <section id="result-card" class="card hidden">
       <div class="result-meta">
         <span id="duration-pill" class="pill">Duration: 0.0s</span>
         <span id="latency-pill" class="pill">Latency: 0.0s</span>
+        <span id="stream-status-pill" class="pill pill-stream hidden">Streaming</span>
       </div>
-      <textarea id="transcript-output" readonly placeholder="Your transcript will appear here."></textarea>
+      <div id="transcript-wrap" class="transcript-wrap">
+        <textarea id="transcript-output" readonly placeholder="Your transcript will appear here."></textarea>
+        <span id="streaming-cursor" class="streaming-cursor hidden">|</span>
+      </div>
       <div class="actions">
         <button id="copy-btn" class="button button-secondary" type="button">Copy</button>
       </div>
