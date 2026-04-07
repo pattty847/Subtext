@@ -6,8 +6,7 @@ Subtext is one local-first project with two companion modes: a private iPhone-fr
 
 Subtext helps you do two related jobs without sending your media to random web tools:
 
-- **Private web service**: use Safari on your iPhone to paste a URL, upload a file, transcribe media, or download the original video.
-- **Private web service**: use Safari on your iPhone to paste a URL, upload a file, transcribe media, run preset transcript analysis, or download the original video.
+- **Private web service**: use Safari on your iPhone to paste a URL, upload a file, transcribe media, run optional preset transcript analysis, or download the original video.
 - **Desktop app**: work locally on your Mac or PC with transcript review, AI analysis, and export tools.
 
 ## Choose Your Mode
@@ -81,7 +80,9 @@ Check that it is alive locally:
 curl http://127.0.0.1:8000/health
 ```
 
-### 5) Publish it privately through Tailscale
+### 5) Publish it privately through Tailscale (recommended)
+
+Subtext listens on **localhost only** (`127.0.0.1:8000`). Tailscale **Serve** exposes that port to your Tailnet with HTTPS and access control — this is the supported “phone from anywhere” path. It is **not** a public-internet deployment; only devices on your Tailnet can reach it.
 
 ```bash
 tailscale serve --bg 8000 http://127.0.0.1:8000
@@ -95,6 +96,8 @@ tailscale serve status
 
 Open the listed Tailnet URL in Safari on your iPhone and enter your `SUBTEXT_SERVER_KEY`.
 
+There is no separate “public” plist or LAN-focused LaunchAgent in this repo on purpose: binding to `0.0.0.0` or same-Wi-Fi URLs is not the default security model.
+
 ### 6) Use it from your phone
 
 From Safari on iPhone you can:
@@ -104,15 +107,30 @@ From Safari on iPhone you can:
 - paste a supported media URL and tap `Download Video Only`
 - upload a local audio/video file and transcribe it
 
-### Optional: keep it always online on macOS
+### Optional: keep the web service always online on macOS (LaunchAgent)
 
-Use the LaunchAgent template at `scripts/com.subtext.private-web.plist` and the helper at `scripts/install_launchd.sh` to auto-start the private web service at login.
+Use **one** tracked template — everything else should match it:
+
+| What | Path |
+|------|------|
+| LaunchAgent plist (template; edit secret after copy, or use the installer) | `scripts/com.subtext.private-web.plist` |
+| Installer (rewrites paths, optional key, installs to `~/Library/LaunchAgents/`) | `scripts/install_launchd.sh` |
+| Wrapper the plist runs | `scripts/start_private_web.sh` |
+
+Install (from the repo root; pass your key, or set `SUBTEXT_SERVER_KEY` in the generated plist afterward):
+
+```bash
+bash scripts/install_launchd.sh "$SUBTEXT_SERVER_KEY"
+```
+
+The LaunchAgent only starts **Subtext on localhost** at login. It does **not** run `tailscale serve` for you — run step 5 once (or add your own automation) so your phone still uses the Tailnet URL from `tailscale serve status`.
 
 Important:
 
+- Label in the template: `com.subtext.private-web` (restart with `launchctl kickstart -k gui/$(id -u)/com.subtext.private-web`).
 - Subtext stays bound to `127.0.0.1:8000` by default.
-- Tailscale proxies traffic in privately; the service is not exposed on `0.0.0.0`.
-- `http://<tailscale-ip>:8000` is not the recommended access path for the hardened setup. Use the Tailnet URL from `tailscale serve status`.
+- Tailscale proxies traffic privately; the service is not exposed on `0.0.0.0`.
+- `http://<tailscale-ip>:8000` is not the recommended access path. Use the Tailnet URL from `tailscale serve status`.
 
 ## Desktop AI Analysis Setup
 
