@@ -117,6 +117,28 @@
     document.cookie = 'subtext_key=; path=/; max-age=0; samesite=lax';
   }
 
+  /** Best-effort parse of RFC 5987 / legacy filename from Content-Disposition. */
+  function filenameFromContentDisposition(header) {
+    if (!header || typeof header !== 'string') {
+      return 'download';
+    }
+    var utf8 = /filename\*=UTF-8''([^;\n]+)/i.exec(header);
+    if (utf8) {
+      try {
+        return decodeURIComponent(utf8[1].trim().replace(/^["']|["']$/g, ''));
+      } catch (_) {}
+    }
+    var quoted = /filename="([^"]+)"/i.exec(header);
+    if (quoted) {
+      return quoted[1];
+    }
+    var plain = /filename=([^;\s]+)/i.exec(header);
+    if (plain) {
+      return plain[1].trim().replace(/^["']|["']$/g, '');
+    }
+    return 'download';
+  }
+
   function flashCopyState(label) {
     const original = copyBtn.textContent;
     copyBtn.textContent = label;
@@ -514,7 +536,7 @@
     }
   });
 
-  downloadBtn.addEventListener('click', function () {
+  downloadBtn.addEventListener('click', async function () {
     hideResult();
 
     const url = urlInput.value.trim();
@@ -537,21 +559,51 @@
 
     persistKey(key);
     showStatus('Preparing download...');
+    setBusy(true);
 
-    const tempForm = document.createElement('form');
-    tempForm.method = 'POST';
-    tempForm.action = '/download-video';
-    tempForm.style.display = 'none';
+    try {
+      const body = new URLSearchParams();
+      body.set('url', url);
 
-    const urlField = document.createElement('input');
-    urlField.type = 'hidden';
-    urlField.name = 'url';
-    urlField.value = url;
-    tempForm.appendChild(urlField);
+      const response = await fetch('/download-video', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-Subtext-Key': key,
+        },
+        body: body.toString(),
+      });
 
-    document.body.appendChild(tempForm);
-    tempForm.submit();
-    document.body.removeChild(tempForm);
+      if (!response.ok) {
+        const payload = await response.json().catch(function () {
+          return { detail: 'Download failed.' };
+        });
+        throw new Error(payload.detail || 'Download failed.');
+      }
+
+      showStatus('Downloading...');
+      const blob = await response.blob();
+      const name = filenameFromContentDisposition(response.headers.get('Content-Disposition'));
+
+      const objectUrl = window.URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = name;
+      anchor.style.display = 'none';
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      window.URL.revokeObjectURL(objectUrl);
+
+      showStatus('Download complete.');
+      window.setTimeout(function () {
+        hideStatus();
+      }, 4000);
+    } catch (error) {
+      showStatus(error.message || 'Download failed.');
+    } finally {
+      setBusy(false);
+    }
   });
 
   analyzeBtn.addEventListener('click', async function () {
