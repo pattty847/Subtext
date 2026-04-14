@@ -18,7 +18,7 @@ import uuid
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, AsyncGenerator, List, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
@@ -80,6 +80,11 @@ class ServiceConfig:
         self.analysis_model = os.getenv("SUBTEXT_ANALYSIS_MODEL", DEFAULT_ANALYSIS_MODEL).strip() or DEFAULT_ANALYSIS_MODEL
         self.server_key = os.getenv("SUBTEXT_SERVER_KEY", "").strip()
         self.allow_tailscale_ips = _env_flag("SUBTEXT_ALLOW_TAILSCALE_IPS", False)
+        # ── CopeNet integration ───────────────────────────────────────────────
+        # Set COPENET_API_URL to your CopeNet instance (e.g. http://localhost:7860)
+        # to proxy /chat/stream through it instead of calling Ollama directly.
+        # Leave blank to use Ollama as a direct fallback.
+        self.copenet_api_url = os.getenv("COPENET_API_URL", "").strip().rstrip("/")
         self.allowed_ips = {
             entry.strip()
             for entry in os.getenv("SUBTEXT_ALLOWED_IPS", "").split(",")
@@ -101,6 +106,21 @@ class AnalyzeRequest(BaseModel):
     humor_style: str = Field(default=DEFAULT_HUMOR_STYLE)
     model: Optional[str] = Field(default=None)
     custom_prompt: str = Field(default="")
+
+
+class ChatMsg(BaseModel):
+    role: str   # "user" | "assistant" | "system"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1)
+    history: List[ChatMsg] = Field(default_factory=list)
+    model: Optional[str] = Field(default=None)
+    # Optional transcript injected as a system-level context message.
+    # When CopeNet is wired up this passes through as-is; CopeNet owns
+    # session memory, so history may be empty and context carries state.
+    transcript_context: Optional[str] = Field(default=None)
 
 
 class AnalysisMetaResponse(BaseModel):
@@ -206,6 +226,48 @@ class PrivateTranscriptionService:
 
     async def list_analysis_models(self) -> List[str]:
         return await self.analyzer.list_available_models()
+
+    async def stream_chat(
+        self,
+        messages: List[dict],
+        model: str,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Stream chat tokens from Ollama via a background thread.
+
+        Yields raw token strings. Raises RuntimeError on model failure.
+        When COPENET_API_URL is configured this method will be swapped out
+        for a CopeNet proxy call — the yield contract stays the same.
+        """
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+
+        def _blocking_stream() -> None:
+            try:
+                for chunk in self.analyzer.client.chat(
+                    model=model,
+                    messages=messages,
+                    stream=True,
+                ):
+                    content = OllamaAnalyzer._extract_chat_content(chunk)
+                    if content:
+                        loop.call_soon_threadsafe(queue.put_nowait, ("token", content))
+                loop.call_soon_threadsafe(queue.put_nowait, ("done", ""))
+            except Exception as exc:  # noqa: BLE001
+                loop.call_soon_threadsafe(queue.put_nowait, ("error", str(exc)))
+
+        future = loop.run_in_executor(None, _blocking_stream)
+
+        while True:
+            kind, data = await queue.get()
+            if kind == "token":
+                yield data
+            elif kind == "done":
+                await future
+                return
+            else:
+                await asyncio.gather(future, return_exceptions=True)
+                raise RuntimeError(data)
 
     async def analyze_transcript(
         self,
@@ -641,6 +703,105 @@ async def transcribe_stream(request: Request, url: str = Form(default=""), file:
 
     return StreamingResponse(
         event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ── Chat endpoints ────────────────────────────────────────────────────────────
+
+@app.get("/chat/models")
+async def chat_models(request: Request) -> dict[str, Any]:
+    """Return locally available Ollama models for the chat selector."""
+    service: PrivateTranscriptionService = request.app.state.service
+    models = await service.list_analysis_models()
+    preferred = list(service.config.preferred_analysis_models)
+    # Merge: preferred first, then any extra discovered models
+    seen: set[str] = set(preferred)
+    for m in models:
+        if m not in seen:
+            preferred.append(m)
+            seen.add(m)
+    return {
+        "models": preferred,
+        "default": service.config.analysis_model,
+        "copenet_configured": bool(service.config.copenet_api_url),
+    }
+
+
+@app.post("/chat/stream")
+async def chat_stream(request: Request, payload: ChatRequest) -> StreamingResponse:
+    """
+    Stream a chat response as SSE tokens.
+
+    SSE events emitted:
+      event: token   data: {"text": "<fragment>"}
+      event: done    data: {}
+      event: error   data: {"detail": "<message>"}
+
+    CopeNet hook-up
+    ───────────────
+    When COPENET_API_URL is set the service config will have
+    ``copenet_api_url`` populated. Wire up the proxy here by replacing
+    the ``service.stream_chat(...)`` call below with a CopeNet HTTP
+    request — the yield contract (raw token strings) stays identical.
+    """
+    service: PrivateTranscriptionService = request.app.state.service
+    config: ServiceConfig = request.app.state.config
+
+    model = (payload.model or config.analysis_model).strip() or config.analysis_model
+
+    # Build message list
+    messages: list[dict] = []
+
+    if payload.transcript_context and payload.transcript_context.strip():
+        messages.append({
+            "role": "system",
+            "content": (
+                "You have access to the following transcript. When the user's "
+                "question relates to this content, ground your answer in it. "
+                "If something isn't covered, say so.\n\n"
+                f"Transcript:\n{payload.transcript_context[:12_000]}"
+            ),
+        })
+
+    for msg in payload.history:
+        messages.append({"role": msg.role, "content": msg.content})
+
+    messages.append({"role": "user", "content": payload.message})
+
+    # ── CopeNet proxy stub ────────────────────────────────────────────────────
+    # TODO: when CopeNet is ready, check config.copenet_api_url here and
+    # replace the stream_chat call with an HTTP SSE proxy to CopeNet.
+    # Example shape (adjust to CopeNet's actual contract):
+    #
+    #   if config.copenet_api_url:
+    #       return _proxy_copenet(config.copenet_api_url, messages, model)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def event_gen():
+        try:
+            async for token in service.stream_chat(messages, model):
+                yield _sse_event("token", {"text": token})
+            yield _sse_event("done", {})
+        except RuntimeError as exc:
+            yield _sse_event("error", {"detail": str(exc)})
+        except Exception as exc:  # noqa: BLE001
+            yield _sse_event("error", {"detail": str(exc)})
+
+    LOGGER.info(
+        "chat_stream model=%s history_len=%s has_context=%s",
+        model,
+        len(payload.history),
+        bool(payload.transcript_context),
+    )
+
+    return StreamingResponse(
+        event_gen(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
