@@ -1,694 +1,878 @@
+/* Subtext Web — main application logic */
 (function () {
-  const STORAGE_KEY = 'subtext-private-key';
-  const form = document.getElementById('transcribe-form');
-  const serviceMetaCard = document.getElementById('service-meta-card');
-  const serviceMetaText = document.getElementById('service-meta-text');
-  const apiKeyInput = document.getElementById('api-key');
-  const urlInput = document.getElementById('url-input');
-  const fileInput = document.getElementById('file-input');
-  const submitBtn = document.getElementById('submit-btn');
-  const downloadBtn = document.getElementById('download-btn');
-  const statusCard = document.getElementById('status-card');
-  const statusText = document.getElementById('status-text');
-  const resultCard = document.getElementById('result-card');
-  const transcriptOutput = document.getElementById('transcript-output');
-  const durationPill = document.getElementById('duration-pill');
-  const latencyPill = document.getElementById('latency-pill');
-  const streamStatusPill = document.getElementById('stream-status-pill');
-  const copyBtn = document.getElementById('copy-btn');
-  const streamingCursor = document.getElementById('streaming-cursor');
-  const streamIndicator = document.getElementById('stream-indicator');
-  const streamLabel = document.getElementById('stream-label');
-  const analysisCard = document.getElementById('analysis-card');
-  const analysisResultCard = document.getElementById('analysis-result-card');
-  const presetSelect = document.getElementById('preset-select');
-  const styleSelect = document.getElementById('style-select');
-  const analysisModelSelect = document.getElementById('analysis-model-select');
-  const customPromptField = document.getElementById('custom-prompt-field');
-  const customPromptInput = document.getElementById('custom-prompt-input');
-  const analyzeBtn = document.getElementById('analyze-btn');
-  const clearAnalysisBtn = document.getElementById('clear-analysis-btn');
-  const analysisMetaPill = document.getElementById('analysis-meta-pill');
-  const analysisDigest = document.getElementById('analysis-digest');
-  const analysisItems = document.getElementById('analysis-items');
+  'use strict';
 
-  let analysisMeta = {
-    default_model: '',
-    preferred_models: [],
-    available_models: [],
-    presets: [],
-    humor_styles: [],
+  const STORAGE_KEY = 'subtext-key';
+
+  // ─── State ────────────────────────────────────────────────────────────────
+  const state = {
+    apiKey: '',
+    activePage: 'media',
+    transcript: '',            // last completed transcript
+    chatMessages: [],          // [{role, content}, …]
+    chatContext: null,         // transcript string injected as context (or null)
+    chatContextLabel: '',
+    chatModel: '',
+    chatStreaming: false,
+    analysisMeta: {
+      default_model: '',
+      preferred_models: [],
+      available_models: [],
+      presets: [],
+      humor_styles: [],
+    },
+    // Reference to the DOM bubble currently being streamed into
+    _streamBubble: null,
+    _streamCursor: null,
   };
 
-  function showStatus(message) {
-    statusCard.classList.remove('hidden');
-    statusText.textContent = message;
-  }
+  // ─── DOM refs ─────────────────────────────────────────────────────────────
+  const $ = (id) => document.getElementById(id);
 
-  function hideStatus() {
-    statusCard.classList.add('hidden');
-  }
+  const serviceDot          = $('service-dot');
+  const serviceNotice       = $('service-notice');
+  const serviceNoticeText   = $('service-notice-text');
+  const keyToggleBtn        = $('key-toggle-btn');
+  const keyDrawer           = $('key-drawer');
+  const apiKeyInput         = $('api-key');
+  const keySaveBtn          = $('key-save-btn');
 
-  function showStreamIndicator(label) {
-    streamIndicator.classList.remove('hidden');
-    streamLabel.textContent = label || 'Transcribing...';
-  }
+  // Media page
+  const transcribeForm      = $('transcribe-form');
+  const urlInput            = $('url-input');
+  const fileInput           = $('file-input');
+  const filePickLabel       = $('file-pick-label');
+  const filePickText        = $('file-pick-text');
+  const submitBtn           = $('submit-btn');
+  const downloadBtn         = $('download-btn');
+  const statusCard          = $('status-card');
+  const statusText          = $('status-text');
+  const resultCard          = $('result-card');
+  const transcriptOutput    = $('transcript-output');
+  const durationPill        = $('duration-pill');
+  const latencyPill         = $('latency-pill');
+  const streamStatusPill    = $('stream-status-pill');
+  const streamingCursor     = $('streaming-cursor');
+  const streamIndicator     = $('stream-indicator');
+  const streamLabel         = $('stream-label');
+  const copyBtn             = $('copy-btn');
+  const chatCtxBtn          = $('chat-ctx-btn');
+  const analysisCard        = $('analysis-card');
+  const analysisResultCard  = $('analysis-result-card');
+  const presetSelect        = $('preset-select');
+  const styleSelect         = $('style-select');
+  const analysisModelSelect = $('analysis-model-select');
+  const customPromptField   = $('custom-prompt-field');
+  const customPromptInput   = $('custom-prompt-input');
+  const analyzeBtn          = $('analyze-btn');
+  const clearAnalysisBtn    = $('clear-analysis-btn');
+  const analysisMetaPill    = $('analysis-meta-pill');
+  const analysisDigest      = $('analysis-digest');
+  const analysisItems       = $('analysis-items');
 
-  function hideStreamIndicator() {
-    streamIndicator.classList.add('hidden');
-  }
+  // Chat page
+  const chatModelSelect     = $('chat-model-select');
+  const chatModelsRefresh   = $('chat-models-refresh');
+  const clearChatBtn        = $('clear-chat-btn');
+  const contextBar          = $('context-bar');
+  const contextLabel        = $('context-label');
+  const clearContextBtn     = $('clear-context-btn');
+  const messagesEl          = $('messages');
+  const welcomeMsg          = $('welcome-msg');
+  const chatInput           = $('chat-input');
+  const sendBtn             = $('send-btn');
+  const stopBtn             = $('stop-btn');
 
-  function hideResult() {
-    resultCard.classList.add('hidden');
-  }
+  // Nav
+  const navMedia            = $('nav-media');
+  const navChat             = $('nav-chat');
 
-  function showResult(payload, streaming) {
-    transcriptOutput.value = payload.text || '';
-    durationPill.textContent = 'Duration: ' + Number(payload.duration || 0).toFixed(2) + 's';
-    latencyPill.textContent = 'Latency: ' + Number(payload.latency || 0).toFixed(2) + 's';
-    resultCard.classList.remove('hidden');
+  // ─── Utilities ────────────────────────────────────────────────────────────
 
-    if (streaming) {
-      streamStatusPill.classList.remove('hidden');
-      streamingCursor.classList.remove('hidden');
-    } else {
-      streamStatusPill.classList.add('hidden');
-      streamingCursor.classList.add('hidden');
-    }
-
-    if ((payload.text || '').trim()) {
-      analysisCard.classList.remove('hidden');
-    }
-  }
-
-  function appendTranscriptChunk(text) {
-    transcriptOutput.value += text;
-    transcriptOutput.scrollTop = transcriptOutput.scrollHeight;
-  }
-
-  function finalizeTranscript() {
-    streamingCursor.classList.add('hidden');
-    streamStatusPill.classList.add('hidden');
-    streamIndicator.classList.add('hidden');
-  }
-
-  function setBusy(isBusy) {
-    submitBtn.disabled = isBusy;
-    downloadBtn.disabled = isBusy;
-  }
-
-  function setAnalyzeBusy(isBusy) {
-    analyzeBtn.disabled = isBusy;
-    clearAnalysisBtn.disabled = isBusy;
-    presetSelect.disabled = isBusy;
-    styleSelect.disabled = isBusy;
-    analysisModelSelect.disabled = isBusy;
+  function apiHeaders(extra) {
+    var h = Object.assign({}, extra || {});
+    if (state.apiKey) h['X-Subtext-Key'] = state.apiKey;
+    return h;
   }
 
   function persistKey(value) {
-    const trimmedValue = value.trim();
-    localStorage.setItem(STORAGE_KEY, trimmedValue);
-
-    const encodedValue = encodeURIComponent(trimmedValue);
-    if (trimmedValue) {
-      document.cookie = 'subtext_key=' + encodedValue + '; path=/; max-age=31536000; samesite=lax';
-      return;
+    state.apiKey = (value || '').trim();
+    localStorage.setItem(STORAGE_KEY, state.apiKey);
+    var enc = encodeURIComponent(state.apiKey);
+    if (state.apiKey) {
+      document.cookie = 'subtext_key=' + enc + '; path=/; max-age=31536000; samesite=lax';
+    } else {
+      document.cookie = 'subtext_key=; path=/; max-age=0; samesite=lax';
     }
-    document.cookie = 'subtext_key=; path=/; max-age=0; samesite=lax';
   }
 
-  /** Best-effort parse of RFC 5987 / legacy filename from Content-Disposition. */
-  function filenameFromContentDisposition(header) {
-    if (!header || typeof header !== 'string') {
-      return 'download';
-    }
-    var utf8 = /filename\*=UTF-8''([^;\n]+)/i.exec(header);
-    if (utf8) {
-      try {
-        return decodeURIComponent(utf8[1].trim().replace(/^["']|["']$/g, ''));
-      } catch (_) {}
-    }
-    var quoted = /filename="([^"]+)"/i.exec(header);
-    if (quoted) {
-      return quoted[1];
-    }
-    var plain = /filename=([^;\s]+)/i.exec(header);
-    if (plain) {
-      return plain[1].trim().replace(/^["']|["']$/g, '');
-    }
+  function filenameFromCD(header) {
+    if (!header) return 'download';
+    var m = /filename\*=UTF-8''([^;\n]+)/i.exec(header);
+    if (m) { try { return decodeURIComponent(m[1].trim().replace(/^["']|["']$/g, '')); } catch (_) {} }
+    m = /filename="([^"]+)"/i.exec(header);
+    if (m) return m[1];
+    m = /filename=([^;\s]+)/i.exec(header);
+    if (m) return m[1].trim().replace(/^["']|["']$/g, '');
     return 'download';
   }
 
-  function flashCopyState(label) {
-    const original = copyBtn.textContent;
-    copyBtn.textContent = label;
-    setTimeout(function () {
-      copyBtn.textContent = original;
-    }, 1500);
-  }
-
-  function fallbackCopyText(text) {
-    transcriptOutput.focus();
-    transcriptOutput.removeAttribute('readonly');
-    transcriptOutput.select();
-    transcriptOutput.setSelectionRange(0, text.length);
-
-    let copied = false;
-    try {
-      copied = document.execCommand('copy');
-    } catch (_) {
-      copied = false;
-    }
-
-    transcriptOutput.setAttribute('readonly', 'readonly');
-    window.getSelection().removeAllRanges();
-    return copied;
-  }
-
   function labelFromName(name) {
-    return String(name || '')
-      .split('_')
-      .map(function (part) {
-        return part ? part.charAt(0).toUpperCase() + part.slice(1) : '';
-      })
-      .join(' ');
+    return String(name || '').split('_').map(function (p) {
+      return p ? p.charAt(0).toUpperCase() + p.slice(1) : '';
+    }).join(' ');
   }
 
-  function populateSelect(select, items, fallbackValue) {
-    select.innerHTML = '';
+  function populateSelect(sel, items, fallback) {
+    sel.innerHTML = '';
     items.forEach(function (item) {
-      const option = document.createElement('option');
-      option.value = item.value;
-      option.textContent = item.label;
-      select.appendChild(option);
+      var opt = document.createElement('option');
+      opt.value = item.value;
+      opt.textContent = item.label;
+      sel.appendChild(opt);
+    });
+    if (fallback) sel.value = fallback;
+    if (!sel.value && items.length) sel.value = items[0].value;
+  }
+
+  // Auto-grow the chat textarea
+  function autoGrow(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 130) + 'px';
+  }
+
+  function scrollToBottom() {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  // ─── Navigation ───────────────────────────────────────────────────────────
+
+  function switchPage(page) {
+    state.activePage = page;
+
+    document.querySelectorAll('.page').forEach(function (el) {
+      el.classList.remove('active');
+      el.setAttribute('aria-hidden', 'true');
     });
 
-    if (fallbackValue) {
-      select.value = fallbackValue;
+    var target = document.getElementById('page-' + page);
+    if (target) {
+      target.classList.add('active');
+      target.removeAttribute('aria-hidden');
     }
-    if (!select.value && items.length) {
-      select.value = items[0].value;
+
+    [navMedia, navChat].forEach(function (btn) {
+      var active = btn.dataset.page === page;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-current', active ? 'page' : 'false');
+    });
+
+    if (page === 'chat') {
+      chatInput.focus();
+      scrollToBottom();
     }
   }
 
-  function renderAnalysisResult(payload) {
-    analysisItems.innerHTML = '';
+  navMedia.addEventListener('click', function () { switchPage('media'); });
+  navChat.addEventListener('click', function () { switchPage('chat'); });
 
-    analysisMetaPill.textContent =
-      'Preset: ' + labelFromName(payload.preset) + ' • Style: ' + labelFromName(payload.humor_style) + ' • Model: ' + (payload.model || 'unknown');
+  // ─── Key drawer ───────────────────────────────────────────────────────────
 
-    if (payload.digest) {
-      analysisDigest.textContent = payload.digest;
-      analysisDigest.classList.remove('hidden');
-    } else {
-      analysisDigest.textContent = '';
-      analysisDigest.classList.add('hidden');
-    }
+  keyToggleBtn.addEventListener('click', function () {
+    var open = keyDrawer.classList.toggle('open');
+    keyToggleBtn.classList.toggle('active', open);
+    keyDrawer.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (open) apiKeyInput.focus();
+  });
 
-    const items = Array.isArray(payload.items) ? payload.items : [];
-    if (payload.custom_response) {
-      const custom = document.createElement('article');
-      custom.className = 'analysis-item';
-
-      const prompt = document.createElement('p');
-      prompt.className = 'analysis-item-why';
-      prompt.textContent = 'Prompt: ' + (payload.custom_prompt || 'Custom prompt');
-
-      const text = document.createElement('p');
-      text.className = 'analysis-item-text';
-      text.textContent = payload.custom_response;
-
-      custom.appendChild(prompt);
-      custom.appendChild(text);
-      analysisItems.appendChild(custom);
-    } else if (!items.length) {
-      const empty = document.createElement('p');
-      empty.className = 'analysis-item-why';
-      empty.textContent = 'The model returned no usable ideas.';
-      analysisItems.appendChild(empty);
-    } else {
-      items.forEach(function (item, index) {
-        const card = document.createElement('article');
-        card.className = 'analysis-item';
-
-        const header = document.createElement('div');
-        header.className = 'analysis-item-header';
-
-        const rankPill = document.createElement('span');
-        rankPill.className = 'pill';
-        rankPill.textContent = '#' + String(index + 1);
-        header.appendChild(rankPill);
-
-        const scorePill = document.createElement('span');
-        scorePill.className = 'pill';
-        scorePill.textContent = 'Score: ' + Math.round(Number(item.score || 0) * 100) + '%';
-        header.appendChild(scorePill);
-
-        const stylePill = document.createElement('span');
-        stylePill.className = 'pill';
-        stylePill.textContent = 'Style: ' + labelFromName(item.humor_style || payload.humor_style);
-        header.appendChild(stylePill);
-
-        const text = document.createElement('p');
-        text.className = 'analysis-item-text';
-        text.textContent = item.text || '';
-
-        const why = document.createElement('p');
-        why.className = 'analysis-item-why';
-        why.textContent = item.why_it_works || 'No rationale returned.';
-
-        card.appendChild(header);
-        card.appendChild(text);
-        card.appendChild(why);
-
-        const flags = Array.isArray(item.risk_flags) ? item.risk_flags.filter(Boolean) : [];
-        if (flags.length) {
-          const flagWrap = document.createElement('div');
-          flagWrap.className = 'risk-flags';
-          flags.forEach(function (flag) {
-            const flagNode = document.createElement('span');
-            flagNode.className = 'risk-flag';
-            flagNode.textContent = flag;
-            flagWrap.appendChild(flagNode);
-          });
-          card.appendChild(flagWrap);
-        }
-
-        analysisItems.appendChild(card);
-      });
-    }
-
-    analysisResultCard.classList.remove('hidden');
+  function saveKey() {
+    persistKey(apiKeyInput.value);
+    keyDrawer.classList.remove('open');
+    keyToggleBtn.classList.remove('active');
+    keyDrawer.setAttribute('aria-hidden', 'true');
+    keyToggleBtn.classList.toggle('active', !!state.apiKey);
   }
 
-  function resetAnalysisResult() {
-    analysisDigest.textContent = '';
-    analysisDigest.classList.add('hidden');
-    analysisItems.innerHTML = '';
-    analysisResultCard.classList.add('hidden');
-  }
+  keySaveBtn.addEventListener('click', saveKey);
+  apiKeyInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); saveKey(); }
+  });
 
-  function syncCustomPromptVisibility() {
-    const isCustom = presetSelect.value === 'custom_prompt';
-    customPromptField.classList.toggle('hidden', !isCustom);
-  }
+  // ─── Service health ───────────────────────────────────────────────────────
 
-  async function loadServiceMeta() {
+  async function loadServiceHealth() {
     try {
-      const response = await fetch('/health', { method: 'GET' });
-      if (!response.ok) {
-        throw new Error('health check failed');
-      }
-
-      const payload = await response.json();
-      const model = payload.model || 'unknown';
-      const backend = payload.backend || 'unknown';
-      const device = payload.device || 'unknown';
-      const analysisModel = payload.analysis_model || 'unknown';
-
-      serviceMetaText.textContent =
-        'Service ready • whisper: ' + model + ' • backend: ' + backend + ' • device: ' + device + ' • analysis: ' + analysisModel;
-      serviceMetaCard.classList.remove('hidden');
+      var res = await fetch('/health');
+      if (!res.ok) throw new Error('bad status');
+      var data = await res.json();
+      serviceDot.classList.add('ok');
+      serviceDot.title = 'Service ready · whisper: ' + data.model + ' · ' + data.backend;
+      serviceNoticeText.textContent =
+        'Ready · whisper: ' + data.model + ' · ' + data.backend + ' · ' + data.device;
+      serviceNotice.classList.remove('hidden');
     } catch (_) {
-      serviceMetaText.textContent = 'Service status unavailable. You can still try transcribing.';
-      serviceMetaCard.classList.remove('hidden');
+      serviceDot.classList.add('error');
+      serviceDot.title = 'Service unreachable';
     }
   }
+
+  // ─── Analysis meta ────────────────────────────────────────────────────────
 
   async function loadAnalysisMeta() {
-    const headers = {};
-    const apiKey = apiKeyInput.value.trim();
-    if (apiKey) {
-      headers['X-Subtext-Key'] = apiKey;
-    }
-
     try {
-      const response = await fetch('/analysis/meta', {
-        method: 'GET',
-        headers: headers,
-      });
-      if (!response.ok) {
-        throw new Error('analysis meta failed');
-      }
-
-      analysisMeta = await response.json();
-
-      populateSelect(
-        presetSelect,
-        (analysisMeta.presets || []).map(function (preset) {
-          return { value: preset.name, label: preset.label };
-        }),
-        'caption_ideas'
-      );
-      populateSelect(
-        styleSelect,
-        (analysisMeta.humor_styles || []).map(function (style) {
-          return { value: style.name, label: style.label };
-        }),
-        'dry'
-      );
-      populateSelect(
-        analysisModelSelect,
-        (analysisMeta.preferred_models || []).map(function (model) {
-          return { value: model, label: model };
-        }),
-        analysisMeta.default_model || ''
-      );
+      var res = await fetch('/analysis/meta', { headers: apiHeaders() });
+      if (!res.ok) throw new Error();
+      state.analysisMeta = await res.json();
     } catch (_) {
-      populateSelect(
-        presetSelect,
-        [
-          { value: 'caption_ideas', label: 'Caption Ideas' },
-          { value: 'hook_rewrites', label: 'Hook Rewrites' },
-          { value: 'title_pack', label: 'Title Pack' },
-          { value: 'custom_prompt', label: 'Custom Prompt' },
+      state.analysisMeta = {
+        default_model: 'gemma3:4b',
+        preferred_models: ['gemma3:4b', 'qwen3:8b', 'llama3.1:8b'],
+        available_models: [],
+        presets: [
+          { name: 'caption_ideas', label: 'Caption Ideas' },
+          { name: 'hook_rewrites', label: 'Hook Rewrites' },
+          { name: 'title_pack',    label: 'Title Pack' },
+          { name: 'custom_prompt', label: 'Custom Prompt' },
         ],
-        'caption_ideas'
-      );
-      populateSelect(
-        styleSelect,
-        [
-          { value: 'dry', label: 'Dry' },
-          { value: 'absurd', label: 'Absurd' },
-          { value: 'deadpan', label: 'Deadpan' },
-          { value: 'brainrot_light', label: 'Brainrot Light' },
-          { value: 'wholesome_ironic', label: 'Wholesome Ironic' },
+        humor_styles: [
+          { name: 'dry',              label: 'Dry' },
+          { name: 'absurd',           label: 'Absurd' },
+          { name: 'deadpan',          label: 'Deadpan' },
+          { name: 'brainrot_light',   label: 'Brainrot Light' },
+          { name: 'wholesome_ironic', label: 'Wholesome Ironic' },
         ],
-        'dry'
-      );
-      populateSelect(
-        analysisModelSelect,
-        [
-          { value: 'gemma3:4b', label: 'gemma3:4b' },
-          { value: 'qwen3:8b', label: 'qwen3:8b' },
-          { value: 'llama3.1:8b', label: 'llama3.1:8b' },
-        ],
-        'gemma3:4b'
-      );
+      };
     }
+
+    var meta = state.analysisMeta;
+    populateSelect(presetSelect, meta.presets.map(function (p) {
+      return { value: p.name, label: p.label };
+    }), 'caption_ideas');
+    populateSelect(styleSelect, meta.humor_styles.map(function (s) {
+      return { value: s.name, label: s.label };
+    }), 'dry');
+    populateSelect(analysisModelSelect, meta.preferred_models.map(function (m) {
+      return { value: m, label: m };
+    }), meta.default_model || '');
 
     syncCustomPromptVisibility();
   }
 
-  apiKeyInput.value = localStorage.getItem(STORAGE_KEY) || '';
-  persistKey(apiKeyInput.value);
-  loadServiceMeta();
-  loadAnalysisMeta();
+  function syncCustomPromptVisibility() {
+    customPromptField.classList.toggle('hidden', presetSelect.value !== 'custom_prompt');
+  }
+  presetSelect.addEventListener('change', syncCustomPromptVisibility);
 
-  apiKeyInput.addEventListener('input', function () {
-    persistKey(apiKeyInput.value);
+  // ─── Chat models ──────────────────────────────────────────────────────────
+
+  async function loadChatModels() {
+    try {
+      var res = await fetch('/chat/models', { headers: apiHeaders() });
+      if (!res.ok) throw new Error();
+      var data = await res.json();
+      var models = data.models || [];
+      var def = data.default || '';
+      populateSelect(chatModelSelect, models.map(function (m) {
+        return { value: m, label: m };
+      }), def);
+      if (chatModelSelect.value) state.chatModel = chatModelSelect.value;
+    } catch (_) {
+      // Fallback populated inline
+      populateSelect(chatModelSelect, [
+        { value: 'gemma3:4b',   label: 'gemma3:4b' },
+        { value: 'qwen3:8b',    label: 'qwen3:8b' },
+        { value: 'llama3.1:8b', label: 'llama3.1:8b' },
+      ], 'gemma3:4b');
+    }
+    state.chatModel = chatModelSelect.value;
+  }
+
+  chatModelSelect.addEventListener('change', function () {
+    state.chatModel = chatModelSelect.value;
   });
+  chatModelsRefresh.addEventListener('click', loadChatModels);
+
+  // ─── Media: transcription ─────────────────────────────────────────────────
 
   urlInput.addEventListener('input', function () {
-    if (urlInput.value.trim()) {
-      fileInput.value = '';
-    }
+    if (urlInput.value.trim()) { fileInput.value = ''; filePickText.textContent = 'Choose audio or video…'; filePickLabel.classList.remove('has-file'); }
   });
 
   fileInput.addEventListener('change', function () {
     if (fileInput.files.length) {
       urlInput.value = '';
+      filePickText.textContent = fileInput.files[0].name;
+      filePickLabel.classList.add('has-file');
     }
   });
 
-  presetSelect.addEventListener('change', syncCustomPromptVisibility);
+  function setMediaBusy(busy) {
+    submitBtn.disabled = busy;
+    downloadBtn.disabled = busy;
+  }
 
-  form.addEventListener('submit', async function (event) {
-    event.preventDefault();
-    hideResult();
-    resetAnalysisResult();
-    finalizeTranscript();
+  function showStatus(msg) {
+    statusText.textContent = msg;
+    statusCard.classList.remove('hidden');
+  }
+  function hideStatus() { statusCard.classList.add('hidden'); }
 
-    const url = urlInput.value.trim();
-    const file = fileInput.files[0] || null;
+  function showStreamIndicator(msg) {
+    streamLabel.textContent = msg || 'Transcribing…';
+    streamIndicator.classList.remove('hidden');
+  }
+  function hideStreamIndicator() { streamIndicator.classList.add('hidden'); }
 
-    if (!url && !file) {
-      showStatus('Paste a URL or choose one audio/video file.');
-      return;
-    }
+  transcribeForm.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var url  = urlInput.value.trim();
+    var file = fileInput.files[0] || null;
 
-    if (url && file) {
-      showStatus('Use either a URL or a file, not both.');
-      return;
-    }
+    if (!url && !file) { showStatus('Paste a URL or choose a file.'); return; }
+    if (url && file)   { showStatus('Use a URL or a file — not both.'); return; }
 
-    const formData = new FormData();
-    if (url) {
-      formData.append('url', url);
-    }
-    if (file) {
-      formData.append('file', file);
-    }
+    resultCard.classList.add('hidden');
+    analysisCard.classList.add('hidden');
+    analysisResultCard.classList.add('hidden');
+    streamStatusPill.classList.add('hidden');
+    streamingCursor.classList.add('hidden');
+    state.transcript = '';
 
-    const headers = {};
-    const apiKey = apiKeyInput.value.trim();
-    if (apiKey) {
-      headers['X-Subtext-Key'] = apiKey;
-    }
+    var fd = new FormData();
+    if (url)  fd.append('url',  url);
+    if (file) fd.append('file', file);
 
-    setBusy(true);
-    showStatus(url ? 'Downloading and transcribing...' : 'Uploading and transcribing...');
-    showStreamIndicator('Transcribing...');
-    showResult({ text: '', duration: 0, latency: 0 }, true);
+    setMediaBusy(true);
+    showStatus(url ? 'Downloading and transcribing…' : 'Uploading and transcribing…');
+    showStreamIndicator('Transcribing…');
+    transcriptOutput.value = '';
+    resultCard.classList.remove('hidden');
+    streamStatusPill.classList.remove('hidden');
+    streamingCursor.classList.remove('hidden');
+    durationPill.textContent = '—';
+    latencyPill.textContent  = '—';
 
     try {
-      const response = await fetch('/transcribe/stream', {
+      var res = await fetch('/transcribe/stream', {
         method: 'POST',
-        headers: headers,
-        body: formData,
+        headers: apiHeaders(),
+        body: fd,
       });
 
-      if (!response.ok) {
-        let detail = 'Request failed.';
-        try {
-          const json = await response.json();
-          detail = json.detail || detail;
-        } catch (_) {}
-        throw new Error(detail);
+      if (!res.ok) {
+        var errJson = await res.json().catch(function () { return {}; });
+        throw new Error(errJson.detail || 'Request failed.');
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let finalPayload = {};
+      var reader  = res.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer  = '';
+      var finalPayload = {};
 
       while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        var chunk = await reader.read();
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
 
-        buffer += decoder.decode(value, { stream: true });
-
-        // Process complete events in buffer
         while (true) {
-          const eventEnd = buffer.indexOf('\n\n');
-          if (eventEnd === -1) break;
+          var end = buffer.indexOf('\n\n');
+          if (end === -1) break;
+          var rawEvent = buffer.slice(0, end);
+          buffer = buffer.slice(end + 2);
 
-          const rawEvent = buffer.slice(0, eventEnd);
-          buffer = buffer.slice(eventEnd + 2);
+          var lines = rawEvent.split('\n');
+          var evtType = '', evtData = '';
+          lines.forEach(function (l) {
+            if (l.startsWith('event: ')) evtType = l.slice(7).trim();
+            if (l.startsWith('data: '))  evtData = l.slice(6);
+          });
 
-          const lines = rawEvent.split('\n');
-          let eventType = '';
-          let eventData = '';
+          var parsed = evtData;
+          try { parsed = JSON.parse(evtData); } catch (_) {}
 
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              eventType = line.slice(7).trim();
-            } else if (line.startsWith('data: ')) {
-              eventData = line.slice(6);
-            }
-          }
-
-          let parsedData = eventData;
-          if (eventData) {
-            try {
-              parsedData = JSON.parse(eventData);
-            } catch (_) {}
-          }
-
-          if (eventType === 'chunk') {
-            appendTranscriptChunk(parsedData.text || '');
-          } else if (eventType === 'done') {
-            if (parsedData && typeof parsedData === 'object') {
-              finalPayload = parsedData;
-            }
-          } else if (eventType === 'error') {
-            throw new Error((parsedData && parsedData.detail) || 'Stream error.');
-          } else if (eventType === 'progress') {
+          if (evtType === 'chunk') {
+            transcriptOutput.value += (parsed.text || '');
+            transcriptOutput.scrollTop = transcriptOutput.scrollHeight;
+          } else if (evtType === 'done') {
+            if (parsed && typeof parsed === 'object') finalPayload = parsed;
+          } else if (evtType === 'error') {
+            throw new Error((parsed && parsed.detail) || 'Stream error.');
+          } else if (evtType === 'progress') {
             hideStatus();
-            showStreamIndicator(parsedData.message || 'Transcribing...');
+            showStreamIndicator(parsed.message || 'Transcribing…');
           }
         }
       }
 
+      state.transcript = transcriptOutput.value;
+      durationPill.textContent = 'Duration: ' + Number(finalPayload.duration || 0).toFixed(2) + 's';
+      latencyPill.textContent  = 'Latency: '  + Number(finalPayload.latency  || 0).toFixed(2) + 's';
       hideStatus();
       hideStreamIndicator();
-      finalizeTranscript();
+      streamStatusPill.classList.add('hidden');
+      streamingCursor.classList.add('hidden');
 
-      const finalText = transcriptOutput.value;
-      showResult({ text: finalText, ...finalPayload }, false);
-    } catch (error) {
+      if (state.transcript.trim()) analysisCard.classList.remove('hidden');
+
+    } catch (err) {
       hideStatus();
       hideStreamIndicator();
-      finalizeTranscript();
-      showStatus(error.message || 'Transcription failed.');
+      streamStatusPill.classList.add('hidden');
+      streamingCursor.classList.add('hidden');
+      showStatus(err.message || 'Transcription failed.');
     } finally {
-      setBusy(false);
+      setMediaBusy(false);
     }
   });
 
+  // ─── Media: download video ─────────────────────────────────────────────────
+
   downloadBtn.addEventListener('click', async function () {
-    hideResult();
+    var url = urlInput.value.trim();
+    if (!url) { showStatus('Paste a media URL to download.'); return; }
+    if (!state.apiKey) { showStatus('Enter the shared key first.'); return; }
 
-    const url = urlInput.value.trim();
-    const file = fileInput.files[0] || null;
-    if (!url) {
-      showStatus('Paste a media URL to download.');
-      return;
-    }
-
-    if (file) {
-      showStatus('Download mode uses a URL only. Clear the file first.');
-      return;
-    }
-
-    const key = apiKeyInput.value.trim();
-    if (!key) {
-      showStatus('Enter the shared key first.');
-      return;
-    }
-
-    persistKey(key);
-    showStatus('Preparing download...');
-    setBusy(true);
+    setMediaBusy(true);
+    showStatus('Preparing download…');
 
     try {
-      const body = new URLSearchParams();
+      var body = new URLSearchParams();
       body.set('url', url);
 
-      const response = await fetch('/download-video', {
+      var res = await fetch('/download-video', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'X-Subtext-Key': key,
-        },
+        headers: apiHeaders({ 'Content-Type': 'application/x-www-form-urlencoded' }),
         body: body.toString(),
       });
 
-      if (!response.ok) {
-        const payload = await response.json().catch(function () {
-          return { detail: 'Download failed.' };
-        });
-        throw new Error(payload.detail || 'Download failed.');
+      if (!res.ok) {
+        var data = await res.json().catch(function () { return {}; });
+        throw new Error(data.detail || 'Download failed.');
       }
 
-      showStatus('Downloading...');
-      const blob = await response.blob();
-      const name = filenameFromContentDisposition(response.headers.get('Content-Disposition'));
-
-      const objectUrl = window.URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = objectUrl;
-      anchor.download = name;
-      anchor.style.display = 'none';
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
-      window.URL.revokeObjectURL(objectUrl);
+      showStatus('Saving…');
+      var blob = await res.blob();
+      var name = filenameFromCD(res.headers.get('Content-Disposition'));
+      var objUrl = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = objUrl; a.download = name; a.style.display = 'none';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(objUrl);
 
       showStatus('Download complete.');
-      window.setTimeout(function () {
-        hideStatus();
-      }, 4000);
-    } catch (error) {
-      showStatus(error.message || 'Download failed.');
+      setTimeout(hideStatus, 4000);
+    } catch (err) {
+      showStatus(err.message || 'Download failed.');
     } finally {
-      setBusy(false);
+      setMediaBusy(false);
     }
   });
 
+  // ─── Media: copy transcript ────────────────────────────────────────────────
+
+  copyBtn.addEventListener('click', function () {
+    var text = transcriptOutput.value;
+    if (!text) return;
+    var original = copyBtn.textContent;
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(function () {
+        copyBtn.textContent = 'Copied';
+        setTimeout(function () { copyBtn.textContent = original; }, 1600);
+      });
+    } else {
+      transcriptOutput.removeAttribute('readonly');
+      transcriptOutput.select();
+      document.execCommand('copy');
+      transcriptOutput.setAttribute('readonly', '');
+      copyBtn.textContent = 'Copied';
+      setTimeout(function () { copyBtn.textContent = original; }, 1600);
+    }
+  });
+
+  // ─── Media: "Chat about this" ──────────────────────────────────────────────
+
+  chatCtxBtn.addEventListener('click', function () {
+    if (!state.transcript) return;
+    setChatContext(state.transcript, 'transcript');
+    switchPage('chat');
+  });
+
+  // ─── Media: analysis ──────────────────────────────────────────────────────
+
+  function setAnalyzeBusy(busy) {
+    analyzeBtn.disabled = busy;
+    clearAnalysisBtn.disabled = busy;
+    presetSelect.disabled = busy;
+    styleSelect.disabled = busy;
+    analysisModelSelect.disabled = busy;
+  }
+
   analyzeBtn.addEventListener('click', async function () {
-    const transcript = transcriptOutput.value.trim();
-    if (!transcript) {
-      showStatus('Transcribe something first.');
-      return;
-    }
-
+    var transcript = transcriptOutput.value.trim();
+    if (!transcript) { showStatus('Transcribe something first.'); return; }
     if (presetSelect.value === 'custom_prompt' && !customPromptInput.value.trim()) {
-      showStatus('Enter a custom prompt first.');
-      return;
-    }
-
-    const headers = { 'Content-Type': 'application/json' };
-    const apiKey = apiKeyInput.value.trim();
-    if (apiKey) {
-      headers['X-Subtext-Key'] = apiKey;
+      showStatus('Enter a custom prompt.'); return;
     }
 
     setAnalyzeBusy(true);
-    showStatus('Running transcript analysis...');
+    showStatus('Running analysis…');
 
     try {
-      const response = await fetch('/analyze', {
+      var res = await fetch('/analyze', {
         method: 'POST',
-        headers: headers,
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
-          transcript: transcript,
-          preset: presetSelect.value,
-          humor_style: styleSelect.value,
-          model: analysisModelSelect.value || null,
+          transcript:    transcript,
+          preset:        presetSelect.value,
+          humor_style:   styleSelect.value,
+          model:         analysisModelSelect.value || null,
           custom_prompt: customPromptInput.value.trim(),
         }),
       });
 
-      if (!response.ok) {
-        const payload = await response.json().catch(function () {
-          return { detail: 'Analysis request failed.' };
-        });
-        throw new Error(payload.detail || 'Analysis request failed.');
+      if (!res.ok) {
+        var data = await res.json().catch(function () { return {}; });
+        throw new Error(data.detail || 'Analysis failed.');
       }
 
-      const payload = await response.json();
-      renderAnalysisResult(payload);
+      renderAnalysis(await res.json());
       hideStatus();
-    } catch (error) {
-      showStatus(error.message || 'Analysis failed.');
+    } catch (err) {
+      showStatus(err.message || 'Analysis failed.');
     } finally {
       setAnalyzeBusy(false);
     }
   });
 
   clearAnalysisBtn.addEventListener('click', function () {
-    resetAnalysisResult();
+    analysisDigest.textContent = '';
+    analysisDigest.classList.add('hidden');
+    analysisItems.innerHTML = '';
+    analysisResultCard.classList.add('hidden');
     customPromptInput.value = '';
     hideStatus();
   });
 
-  copyBtn.addEventListener('click', function () {
-    const text = transcriptOutput.value;
-    if (!text) {
-      return;
+  function renderAnalysis(payload) {
+    analysisItems.innerHTML = '';
+    analysisMetaPill.textContent =
+      labelFromName(payload.preset) + ' · ' +
+      labelFromName(payload.humor_style) + ' · ' +
+      (payload.model || '—');
+
+    if (payload.digest) {
+      analysisDigest.textContent = payload.digest;
+      analysisDigest.classList.remove('hidden');
+    } else {
+      analysisDigest.classList.add('hidden');
     }
 
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).then(
-        function () {
-          flashCopyState('Copied');
-        },
-        function () {
-          if (fallbackCopyText(text)) {
-            flashCopyState('Copied');
-            return;
-          }
-          flashCopyState('Select text');
+    var items = Array.isArray(payload.items) ? payload.items : [];
+
+    if (payload.custom_response) {
+      var art = document.createElement('article');
+      art.className = 'analysis-item';
+      var prompt = document.createElement('p');
+      prompt.className = 'analysis-item-why';
+      prompt.textContent = 'Prompt: ' + (payload.custom_prompt || 'Custom');
+      var text = document.createElement('p');
+      text.className = 'analysis-item-text';
+      text.textContent = payload.custom_response;
+      art.appendChild(prompt); art.appendChild(text);
+      analysisItems.appendChild(art);
+    } else if (!items.length) {
+      var empty = document.createElement('p');
+      empty.className = 'analysis-item-why';
+      empty.textContent = 'No ideas returned.';
+      analysisItems.appendChild(empty);
+    } else {
+      items.forEach(function (item, idx) {
+        var art = document.createElement('article');
+        art.className = 'analysis-item';
+
+        var hdr = document.createElement('div');
+        hdr.className = 'analysis-item-header';
+
+        function mkPill(txt) {
+          var s = document.createElement('span'); s.className = 'pill'; s.textContent = txt; return s;
         }
-      );
-      return;
+        hdr.appendChild(mkPill('#' + (idx + 1)));
+        hdr.appendChild(mkPill('Score: ' + Math.round(Number(item.score || 0) * 100) + '%'));
+        hdr.appendChild(mkPill(labelFromName(item.humor_style || payload.humor_style)));
+
+        var txt = document.createElement('p');
+        txt.className = 'analysis-item-text';
+        txt.textContent = item.text || '';
+
+        var why = document.createElement('p');
+        why.className = 'analysis-item-why';
+        why.textContent = item.why_it_works || '';
+
+        art.appendChild(hdr); art.appendChild(txt); art.appendChild(why);
+
+        var flags = Array.isArray(item.risk_flags) ? item.risk_flags.filter(Boolean) : [];
+        if (flags.length) {
+          var fw = document.createElement('div'); fw.className = 'risk-flags';
+          flags.forEach(function (f) {
+            var s = document.createElement('span'); s.className = 'risk-flag'; s.textContent = f; fw.appendChild(s);
+          });
+          art.appendChild(fw);
+        }
+
+        analysisItems.appendChild(art);
+      });
     }
 
-    if (fallbackCopyText(text)) {
-      flashCopyState('Copied');
-      return;
+    analysisResultCard.classList.remove('hidden');
+  }
+
+  // ─── Chat: context ─────────────────────────────────────────────────────────
+
+  function setChatContext(text, label) {
+    state.chatContext = text;
+    state.chatContextLabel = label || 'transcript';
+    contextLabel.textContent = 'Context: ' + (state.chatContextLabel.length > 36
+      ? state.chatContextLabel.slice(0, 33) + '…'
+      : state.chatContextLabel);
+    contextBar.classList.remove('hidden');
+  }
+
+  function clearChatContext() {
+    state.chatContext = null;
+    state.chatContextLabel = '';
+    contextBar.classList.add('hidden');
+  }
+
+  clearContextBtn.addEventListener('click', clearChatContext);
+
+  // ─── Chat: message rendering ───────────────────────────────────────────────
+
+  function hideWelcome() {
+    if (welcomeMsg) welcomeMsg.style.display = 'none';
+  }
+
+  function appendMessage(role, content) {
+    hideWelcome();
+    var msg = document.createElement('div');
+    msg.className = 'msg ' + role;
+
+    var lbl = document.createElement('div');
+    lbl.className = 'msg-label';
+    lbl.textContent = role === 'user' ? 'You' : 'Assistant';
+
+    var bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = content;
+
+    msg.appendChild(lbl);
+    msg.appendChild(bubble);
+    messagesEl.appendChild(msg);
+    scrollToBottom();
+    return bubble;
+  }
+
+  function appendErrorMsg(text) {
+    hideWelcome();
+    var div = document.createElement('div');
+    div.className = 'msg-error';
+    div.textContent = text;
+    messagesEl.appendChild(div);
+    scrollToBottom();
+  }
+
+  // Begin a streaming assistant bubble — returns the bubble element
+  function beginStreamBubble() {
+    hideWelcome();
+    var msg = document.createElement('div');
+    msg.className = 'msg assistant';
+
+    var lbl = document.createElement('div');
+    lbl.className = 'msg-label';
+    lbl.textContent = 'Assistant';
+
+    var bubble = document.createElement('div');
+    bubble.className = 'bubble';
+
+    var cursor = document.createElement('span');
+    cursor.className = 'typing-cursor';
+    bubble.appendChild(cursor);
+
+    msg.appendChild(lbl);
+    msg.appendChild(bubble);
+    messagesEl.appendChild(msg);
+    scrollToBottom();
+
+    state._streamBubble = bubble;
+    state._streamCursor = cursor;
+    return bubble;
+  }
+
+  function appendToken(token) {
+    if (!state._streamBubble || !state._streamCursor) return;
+    // Insert text node before the cursor
+    var textNode = document.createTextNode(token);
+    state._streamBubble.insertBefore(textNode, state._streamCursor);
+    scrollToBottom();
+  }
+
+  function finalizeStream(fullText) {
+    if (state._streamBubble && state._streamCursor) {
+      state._streamCursor.remove();
+      state._streamCursor = null;
+      // Store complete content on the bubble for later reference
+      state._streamBubble.dataset.content = fullText;
     }
-    flashCopyState('Select text');
+    state._streamBubble = null;
+  }
+
+  // ─── Chat: send / stream ────────────────────────────────────────────────────
+
+  function setChatBusy(busy) {
+    state.chatStreaming = busy;
+    chatInput.disabled = busy;
+    sendBtn.classList.toggle('hidden', busy);
+    stopBtn.classList.toggle('hidden', !busy);
+  }
+
+  async function sendChat() {
+    var text = chatInput.value.trim();
+    if (!text || state.chatStreaming) return;
+
+    var model = chatModelSelect.value || state.chatModel;
+    if (!model) { appendErrorMsg('Select a model first.'); return; }
+
+    // Show user message
+    appendMessage('user', text);
+    state.chatMessages.push({ role: 'user', content: text });
+    chatInput.value = '';
+    autoGrow(chatInput);
+
+    setChatBusy(true);
+
+    var requestBody = {
+      message:  text,
+      history:  state.chatMessages.slice(0, -1),  // history before this message
+      model:    model,
+    };
+    if (state.chatContext) {
+      requestBody.transcript_context = state.chatContext;
+    }
+
+    var fullResponse = '';
+    beginStreamBubble();
+
+    try {
+      var res = await fetch('/chat/stream', {
+        method: 'POST',
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!res.ok) {
+        var errData = await res.json().catch(function () { return {}; });
+        throw new Error(errData.detail || 'Chat request failed.');
+      }
+
+      var reader  = res.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer  = '';
+
+      while (true) {
+        var chunk = await reader.read();
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+
+        while (true) {
+          var end = buffer.indexOf('\n\n');
+          if (end === -1) break;
+          var rawEvent = buffer.slice(0, end);
+          buffer = buffer.slice(end + 2);
+
+          var lines = rawEvent.split('\n');
+          var evtType = '', evtData = '';
+          lines.forEach(function (l) {
+            if (l.startsWith('event: ')) evtType = l.slice(7).trim();
+            if (l.startsWith('data: '))  evtData = l.slice(6);
+          });
+
+          var parsed = evtData;
+          try { parsed = JSON.parse(evtData); } catch (_) {}
+
+          if (evtType === 'token') {
+            var tok = (parsed && parsed.text) || '';
+            fullResponse += tok;
+            appendToken(tok);
+          } else if (evtType === 'done') {
+            // stream finished normally
+          } else if (evtType === 'error') {
+            throw new Error((parsed && parsed.detail) || 'Stream error.');
+          }
+        }
+      }
+
+      finalizeStream(fullResponse);
+      state.chatMessages.push({ role: 'assistant', content: fullResponse });
+
+    } catch (err) {
+      finalizeStream('');
+      appendErrorMsg(err.message || 'Something went wrong.');
+      // Roll back the user message we added optimistically
+      state.chatMessages.pop();
+    } finally {
+      setChatBusy(false);
+      chatInput.focus();
+    }
+  }
+
+  sendBtn.addEventListener('click', sendChat);
+
+  stopBtn.addEventListener('click', function () {
+    // Abort is handled by the reader going out of scope on next request;
+    // for a hard stop we mark busy=false so the loop's finally runs cleanly.
+    setChatBusy(false);
+    finalizeStream(state._streamBubble
+      ? (state._streamBubble.textContent || '')
+      : '');
   });
+
+  chatInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendChat();
+    }
+  });
+
+  chatInput.addEventListener('input', function () { autoGrow(chatInput); });
+
+  clearChatBtn.addEventListener('click', function () {
+    state.chatMessages = [];
+    messagesEl.innerHTML = '';
+    // Restore welcome message
+    var welcome = document.createElement('div');
+    welcome.className = 'welcome-msg';
+    welcome.id = 'welcome-msg';
+    welcome.innerHTML =
+      '<p class="welcome-title">Subtext Chat</p>' +
+      '<p class="welcome-body">Chat with a local model. Transcribe something on the Media tab, ' +
+      'then tap <strong>Chat about this →</strong> to ask questions about it.</p>';
+    messagesEl.appendChild(welcome);
+  });
+
+  // ─── Boot ─────────────────────────────────────────────────────────────────
+
+  function init() {
+    // Restore key from storage
+    var stored = localStorage.getItem(STORAGE_KEY) || '';
+    apiKeyInput.value = stored;
+    persistKey(stored);
+    // Show key icon as active if key exists
+    keyToggleBtn.classList.toggle('active', !!stored);
+
+    loadServiceHealth();
+    loadAnalysisMeta();
+    loadChatModels();
+  }
+
+  init();
+
 })();

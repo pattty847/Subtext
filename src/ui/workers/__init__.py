@@ -8,6 +8,7 @@ from src.ui.workers.analysis_worker import (
     InstallModelWorker,
     ModelTestWorker,
 )
+from src.ui.workers.chat_worker import ChatWorker
 
 __all__ = [
     "DownloadWorker",
@@ -15,5 +16,6 @@ __all__ = [
     "CustomAnalysisWorker",
     "InstallModelWorker",
     "ModelTestWorker",
+    "ChatWorker",
 ]
 
