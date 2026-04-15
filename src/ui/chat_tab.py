@@ -333,8 +333,8 @@ class ChatTab(QWidget):
         self._worker.start()
 
     def _build_payload(self) -> list[dict]:
-        """Assemble message list; inject system prompt on the first turn."""
-        if self._transcript_context and len(self.messages) == 1:
+        """Assemble message list; inject system prompt if context is active."""
+        if self._transcript_context:
             clamped = self._transcript_context[:_MAX_TRANSCRIPT_CHARS]
             system = {
                 "role": "system",
