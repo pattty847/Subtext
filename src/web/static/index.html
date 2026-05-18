@@ -5,17 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#080b10">
+  <meta name="theme-color" content="#07090d">
   <title>Subtext</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=20260416b">
 </head>
 <body>
 
   <!-- ── Top bar ─────────────────────────────────────────────────── -->
   <header class="top-bar">
-    <span class="top-bar-logo">Subtext</span>
-    <div class="top-bar-right">
+    <div class="top-bar-brand">
+      <span class="top-bar-logo">Subtext</span>
       <span class="service-dot" id="service-dot" title="Checking service…"></span>
+    </div>
+    <div class="top-bar-right">
       <button class="icon-btn" id="key-toggle-btn" aria-label="API key" title="API key">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="7.5" cy="15.5" r="5.5"/><path d="M21 2L13 10M15 4l2 2M11 12l2 2"/>
@@ -31,7 +33,7 @@
       <div class="key-input-row">
         <input id="api-key" type="password" placeholder="X-Subtext-Key"
                autocomplete="off" autocapitalize="off" spellcheck="false">
-        <button class="btn btn-sm btn-teal" id="key-save-btn">Save</button>
+        <button class="btn btn-sm btn-accent" id="key-save-btn">Save</button>
       </div>
     </div>
   </div>
@@ -47,100 +49,111 @@
         <span id="service-notice-text">Checking service…</span>
       </div>
 
-      <!-- Input card -->
-      <div class="card">
-        <form id="transcribe-form" class="form-stack" novalidate>
-          <div class="field">
-            <label class="field-label" for="url-input">URL</label>
-            <input id="url-input" type="url"
-                   placeholder="YouTube, Twitter, TikTok, anywhere…"
-                   autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="media-layout">
+        <div class="media-col media-col--input">
+
+          <form id="transcribe-form" class="media-form" novalidate>
+            <div class="field">
+              <label class="field-label" for="url-input">URL</label>
+              <input id="url-input" type="url"
+                     placeholder="YouTube, Twitter, TikTok, anywhere…"
+                     autocomplete="off" autocapitalize="off" spellcheck="false">
+            </div>
+
+            <div class="or-divider"><span>or</span></div>
+
+            <div class="field">
+              <label class="field-label" for="file-input">Local file</label>
+              <label class="file-pick" id="file-pick-label">
+                <input id="file-input" type="file"
+                       accept="audio/*,video/*,.wav,.m4a,.mp3,.aac,.flac,.ogg,.opus,.webm,.mp4,.mov,.m4v,.avi,.mkv">
+                <svg class="file-pick-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <span id="file-pick-text">Choose audio or video…</span>
+              </label>
+            </div>
+
+            <div class="action-row action-row--stack-mobile">
+              <button id="submit-btn" class="btn btn-primary" type="submit">Transcribe</button>
+              <button id="download-audio-btn" class="btn btn-accent" type="button">Download Audio</button>
+              <button id="download-btn" class="btn btn-secondary" type="button">Download Video</button>
+            </div>
+          </form>
+
+          <!-- Status -->
+          <div class="status-inline hidden" id="status-card" aria-live="polite">
+            <span class="pulse-ring"></span>
+            <span id="status-text">Processing…</span>
           </div>
 
-          <div class="or-divider"><span>or</span></div>
+        </div><!-- /.media-col--input -->
 
-          <div class="field">
-            <label class="field-label" for="file-input">Local file</label>
-            <label class="file-pick" id="file-pick-label">
-              <input id="file-input" type="file"
-                     accept="audio/*,video/*,.wav,.m4a,.mp3,.aac,.flac,.ogg,.opus,.webm,.mp4,.mov,.m4v,.avi,.mkv">
-              <span id="file-pick-text">Choose audio or video…</span>
-            </label>
+        <div class="media-col media-col--output">
+
+          <!-- Result -->
+          <div class="result-area hidden" id="result-card">
+            <div class="pill-row">
+              <span class="pill" id="duration-pill">—</span>
+              <span class="pill" id="latency-pill">—</span>
+              <span class="pill pill-stream hidden" id="stream-status-pill">Streaming</span>
+            </div>
+            <div class="transcript-wrap">
+              <textarea id="transcript-output" readonly
+                        placeholder="Your transcript will appear here."></textarea>
+              <span class="stream-cursor hidden" id="streaming-cursor">|</span>
+            </div>
+            <div class="stream-indicator hidden" id="stream-indicator">
+              <span class="stream-dot"></span>
+              <span id="stream-label">Transcribing…</span>
+            </div>
+            <div class="result-actions">
+              <button id="copy-btn" class="btn btn-secondary btn-sm">Copy</button>
+              <button id="chat-ctx-btn" class="btn btn-accent btn-sm">Chat about this</button>
+            </div>
           </div>
 
-          <div class="action-row">
-            <button id="submit-btn" class="btn btn-primary" type="submit">Transcribe</button>
-            <button id="download-btn" class="btn btn-ghost" type="button">Download</button>
+          <!-- Analysis controls -->
+          <div class="analysis-area hidden" id="analysis-card">
+            <p class="section-label">Analyze transcript</p>
+            <div class="analysis-form">
+              <div class="analysis-row">
+                <div class="field field-compact">
+                  <label class="field-label" for="preset-select">Preset</label>
+                  <select id="preset-select"></select>
+                </div>
+                <div class="field field-compact">
+                  <label class="field-label" for="style-select">Style</label>
+                  <select id="style-select"></select>
+                </div>
+                <div class="field field-compact">
+                  <label class="field-label" for="analysis-model-select">Model</label>
+                  <select id="analysis-model-select"></select>
+                </div>
+              </div>
+              <div class="field hidden" id="custom-prompt-field">
+                <label class="field-label" for="custom-prompt-input">Custom prompt</label>
+                <textarea id="custom-prompt-input"
+                          placeholder="e.g. Pull out the three funniest moments and explain why they work."></textarea>
+              </div>
+              <div class="action-row action-row--compact">
+                <button id="analyze-btn" class="btn btn-primary btn-sm">Analyze</button>
+                <button id="clear-analysis-btn" class="btn btn-secondary btn-sm">Clear</button>
+              </div>
+            </div>
           </div>
-        </form>
-      </div>
 
-      <!-- Status card -->
-      <div class="card card-status hidden" id="status-card" aria-live="polite">
-        <div class="status-row">
-          <span class="pulse-ring"></span>
-          <span id="status-text">Processing…</span>
-        </div>
-      </div>
+          <!-- Analysis results -->
+          <div class="analysis-results hidden" id="analysis-result-card" aria-live="polite">
+            <div class="pill-row" id="analysis-meta-row">
+              <span class="pill" id="analysis-meta-pill">—</span>
+            </div>
+            <div id="analysis-digest" class="analysis-digest hidden"></div>
+            <div id="analysis-items" class="analysis-items"></div>
+          </div>
 
-      <!-- Result card -->
-      <div class="card hidden" id="result-card">
-        <div class="pill-row">
-          <span class="pill" id="duration-pill">—</span>
-          <span class="pill" id="latency-pill">—</span>
-          <span class="pill pill-stream hidden" id="stream-status-pill">Streaming</span>
-        </div>
-        <div class="transcript-wrap">
-          <textarea id="transcript-output" readonly
-                    placeholder="Your transcript will appear here."></textarea>
-          <span class="stream-cursor hidden" id="streaming-cursor">|</span>
-        </div>
-        <div class="stream-indicator hidden" id="stream-indicator">
-          <span class="stream-dot"></span>
-          <span id="stream-label">Transcribing…</span>
-        </div>
-        <div class="result-actions">
-          <button id="copy-btn" class="btn btn-ghost">Copy</button>
-          <button id="chat-ctx-btn" class="btn btn-teal">Chat about this →</button>
-        </div>
-      </div>
-
-      <!-- Analysis card -->
-      <div class="card hidden" id="analysis-card">
-        <p class="card-eyebrow">Analyze transcript</p>
-        <div class="form-stack">
-          <div class="field">
-            <label class="field-label" for="preset-select">Preset</label>
-            <select id="preset-select"></select>
-          </div>
-          <div class="field">
-            <label class="field-label" for="style-select">Style</label>
-            <select id="style-select"></select>
-          </div>
-          <div class="field">
-            <label class="field-label" for="analysis-model-select">Model</label>
-            <select id="analysis-model-select"></select>
-          </div>
-          <div class="field hidden" id="custom-prompt-field">
-            <label class="field-label" for="custom-prompt-input">Custom prompt</label>
-            <textarea id="custom-prompt-input"
-                      placeholder="e.g. Pull out the three funniest moments and explain why they work."></textarea>
-          </div>
-          <div class="action-row">
-            <button id="analyze-btn" class="btn btn-primary">Analyze</button>
-            <button id="clear-analysis-btn" class="btn btn-ghost">Clear</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Analysis results -->
-      <div class="card hidden" id="analysis-result-card" aria-live="polite">
-        <div class="pill-row" id="analysis-meta-row">
-          <span class="pill" id="analysis-meta-pill">—</span>
-        </div>
-        <div id="analysis-digest" class="analysis-digest hidden"></div>
-        <div id="analysis-items" class="analysis-items"></div>
-      </div>
+        </div><!-- /.media-col--output -->
+      </div><!-- /.media-layout -->
 
     </section><!-- /page-media -->
 
@@ -152,24 +165,49 @@
         <div class="chat-model-row">
           <label class="field-label sr-only" for="chat-model-select">Model</label>
           <select id="chat-model-select" class="chat-model-select"></select>
-          <button class="btn btn-xs btn-ghost" id="chat-models-refresh" title="Refresh models">⟳</button>
+          <button class="icon-btn icon-btn--sm" id="chat-models-refresh" title="Refresh models">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+          </button>
         </div>
-        <button class="btn btn-xs btn-ghost" id="clear-chat-btn" title="Clear chat">Clear</button>
+        <button class="icon-btn icon-btn--sm" id="clear-chat-btn" title="New chat">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+        </button>
       </div>
 
-      <!-- Context badge (shown when transcript is loaded) -->
+      <!-- Context badge -->
       <div class="context-bar hidden" id="context-bar">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
         <span id="context-label">Transcript loaded as context</span>
-        <button class="context-clear-btn" id="clear-context-btn" aria-label="Remove context">✕</button>
+        <button class="context-clear-btn" id="clear-context-btn" aria-label="Remove context">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
       </div>
 
       <!-- Messages -->
       <div class="messages" id="messages" aria-live="polite" aria-atomic="false">
         <div class="welcome-msg" id="welcome-msg">
-          <p class="welcome-title">Subtext Chat</p>
-          <p class="welcome-body">Chat with a local model. Transcribe something on the Media tab, then tap <strong>Chat about this →</strong> to ask questions about it.</p>
+          <div class="welcome-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+          </div>
+          <p class="welcome-title">Chat</p>
+          <p class="welcome-body">Talk to a local model about your transcripts. Transcribe something on Media, then tap <strong>Chat about this</strong> to load it as context.</p>
         </div>
+      </div>
+
+      <!-- Quick-action chips (visible when context is loaded) -->
+      <div class="quick-actions hidden" id="quick-actions">
+        <button class="chip" data-prompt="Summarize this transcript in 3-4 concise bullet points.">Summarize</button>
+        <button class="chip" data-prompt="What are the key points and main arguments in this transcript?">Key points</button>
+        <button class="chip" data-prompt="Generate 5 funny meme caption ideas inspired by this transcript. Be creative and irreverent.">Meme ideas</button>
+        <button class="chip" data-prompt="What are the most interesting or surprising moments in this transcript? Explain why they stand out.">Highlights</button>
+        <button class="chip" data-prompt="Write a catchy social media post about this content. Include 2-3 hook options.">Social post</button>
       </div>
 
       <!-- Input area -->
@@ -177,14 +215,14 @@
         <div class="chat-input-row">
           <textarea id="chat-input" class="chat-textarea" placeholder="Message…" rows="1"
                     aria-label="Chat message"></textarea>
-          <button id="send-btn" class="btn btn-send" aria-label="Send">
+          <button id="send-btn" class="btn-circle btn-circle--send" aria-label="Send">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>
             </svg>
           </button>
-          <button id="stop-btn" class="btn btn-stop hidden" aria-label="Stop">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="4" y="4" width="16" height="16" rx="2"/>
+          <button id="stop-btn" class="btn-circle btn-circle--stop hidden" aria-label="Stop">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="4" y="4" width="16" height="16" rx="3"/>
             </svg>
           </button>
         </div>
@@ -210,6 +248,6 @@
     </button>
   </nav>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20260416b"></script>
 </body>
 </html>

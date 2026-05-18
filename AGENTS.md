@@ -26,6 +26,7 @@ Keep these modes coherent, but do not blur their boundaries in code or docs.
 - Runs via `run_web.py`
 - Binds to `127.0.0.1:8000` by default
 - Intended to be exposed privately through Tailscale Serve
+- **Default implementation target:** If work is for the phone/browser + Tailscale workflow (many contributors’ primary use), implement UI and feature changes in **`src/web/`** and shared **`src/core/`**. Do **not** duplicate into the PySide desktop app (`src/ui/`) unless the task explicitly calls for desktop parity.
 - Supports:
   - URL transcription
   - local audio/video file transcription

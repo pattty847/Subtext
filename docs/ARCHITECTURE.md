@@ -35,7 +35,21 @@ Input URLs/files -> Download/Captions -> Transcription -> LLM Analysis -> Export
 
 ## Config Layer (`src/config`)
 
-- `paths.py`: centralized project paths (`assets/videos`, `assets/transcripts`, `assets/analysis`)
+- `paths.py`: centralized project paths (`assets/videos`, `assets/transcripts`, `assets/analysis`, and user-facing `Downloads`)
+
+## CLI Layer (`src/cli.py`)
+
+- Provides command-line access to the already-running private web service.
+- Calls `POST /transcribe` for URL or local-file transcription and saves returned transcripts into `Downloads/`.
+- Calls `POST /download-video` for URL video downloads and streams the attachment response into `Downloads/`.
+- Supports `download-list` for sequentially processing a reviewed newline-delimited URL file.
+- Uses `SUBTEXT_SERVER_KEY` by default and keeps the same localhost/Tailscale access model as the browser UI.
+
+## Crate Helpers
+
+- `crates/morpher_demo_crate.txt`: newline-delimited title list for the first Morpher demo crate.
+- `scripts/resolve_youtube_titles.py`: metadata-only helper that searches YouTube for each crate title and writes review TSV, JSONL, and URL-list outputs.
+- `src/youtube_resolver.py`: shared resolver and output-writing logic used by the script and tests.
 
 ## Key Runtime Patterns
 
@@ -103,6 +117,7 @@ AnalysisTab.analysis_completed -> MainWindow -> ResultsTab.load_results
 - `server.py`: FastAPI private service; POST `/transcribe` for synchronous URL or upload transcription, POST `/download-video` for attachment-style media download, POST `/analyze` for on-demand transcript analysis, GET `/analysis/meta` for preset/model metadata, and GET `/health` for health checks. URL requests use `yt-dlp` download flow, uploaded media is transcribed directly, Whisper loads once at startup, and all heavy work is serialized behind one async lock.
 - `static/`: Mobile-first page for iPhone Safari/Shortcuts workflows. Supports a media URL or local audio/video upload, URL-only download mode for saving video to the phone, and on-page transcript analysis presets after a transcript is available.
 - Launched with `run_web.py` (uvicorn on `127.0.0.1:8000` by default). Intended to sit behind Tailscale Serve or another loopback-only private proxy instead of binding to all interfaces.
+- `src/cli.py`: non-browser client for the same running service; it does not load its own Whisper model or duplicate web-service business logic.
 
 Mode boundary:
 - The private web service focuses on download/transcribe convenience for remote browser use.
@@ -114,6 +129,8 @@ Mode boundary:
 src/
   config/
   core/
+  cli.py
+  youtube_resolver.py
   ui/
     workers/
     widgets/
@@ -123,6 +140,7 @@ src/
 docs/
   ARCHITECTURE.md
 scripts/
+  resolve_youtube_titles.py
   build_exe.py
   install_cuda.bat
 assets/

@@ -44,6 +44,7 @@
   const filePickLabel       = $('file-pick-label');
   const filePickText        = $('file-pick-text');
   const submitBtn           = $('submit-btn');
+  const downloadAudioBtn    = $('download-audio-btn');
   const downloadBtn         = $('download-btn');
   const statusCard          = $('status-card');
   const statusText          = $('status-text');
@@ -79,6 +80,7 @@
   const clearContextBtn     = $('clear-context-btn');
   const messagesEl          = $('messages');
   const welcomeMsg          = $('welcome-msg');
+  const quickActions        = $('quick-actions');
   const chatInput           = $('chat-input');
   const sendBtn             = $('send-btn');
   const stopBtn             = $('stop-btn');
@@ -138,7 +140,7 @@
   // Auto-grow the chat textarea
   function autoGrow(el) {
     el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 130) + 'px';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
   }
 
   function scrollToBottom() {
@@ -308,6 +310,7 @@
 
   function setMediaBusy(busy) {
     submitBtn.disabled = busy;
+    downloadAudioBtn.disabled = busy;
     downloadBtn.disabled = busy;
   }
 
@@ -425,21 +428,21 @@
     }
   });
 
-  // ─── Media: download video ─────────────────────────────────────────────────
+  // ─── Media: downloads ──────────────────────────────────────────────────────
 
-  downloadBtn.addEventListener('click', async function () {
+  async function triggerDownload(endpoint, pendingMessage, doneMessage) {
     var url = urlInput.value.trim();
     if (!url) { showStatus('Paste a media URL to download.'); return; }
     if (!state.apiKey) { showStatus('Enter the shared key first.'); return; }
 
     setMediaBusy(true);
-    showStatus('Preparing download…');
+    showStatus(pendingMessage);
 
     try {
       var body = new URLSearchParams();
       body.set('url', url);
 
-      var res = await fetch('/download-video', {
+      var res = await fetch(endpoint, {
         method: 'POST',
         headers: apiHeaders({ 'Content-Type': 'application/x-www-form-urlencoded' }),
         body: body.toString(),
@@ -459,13 +462,21 @@
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       URL.revokeObjectURL(objUrl);
 
-      showStatus('Download complete.');
+      showStatus(doneMessage);
       setTimeout(hideStatus, 4000);
     } catch (err) {
       showStatus(err.message || 'Download failed.');
     } finally {
       setMediaBusy(false);
     }
+  }
+
+  downloadAudioBtn.addEventListener('click', function () {
+    triggerDownload('/download-audio', 'Preparing audio download…', 'Audio download complete.');
+  });
+
+  downloadBtn.addEventListener('click', function () {
+    triggerDownload('/download-video', 'Preparing video download…', 'Video download complete.');
   });
 
   // ─── Media: copy transcript ────────────────────────────────────────────────
@@ -635,15 +646,31 @@
       ? state.chatContextLabel.slice(0, 33) + '…'
       : state.chatContextLabel);
     contextBar.classList.remove('hidden');
+    if (quickActions) quickActions.classList.remove('hidden');
   }
 
   function clearChatContext() {
     state.chatContext = null;
     state.chatContextLabel = '';
     contextBar.classList.add('hidden');
+    if (quickActions) quickActions.classList.add('hidden');
   }
 
   clearContextBtn.addEventListener('click', clearChatContext);
+
+  // ─── Chat: quick-action chips ──────────────────────────────────────────────
+
+  if (quickActions) {
+    quickActions.addEventListener('click', function (e) {
+      var chip = e.target.closest('.chip');
+      if (!chip || state.chatStreaming) return;
+      var prompt = chip.dataset.prompt;
+      if (!prompt) return;
+      chatInput.value = prompt;
+      autoGrow(chatInput);
+      sendChat();
+    });
+  }
 
   // ─── Chat: message rendering ───────────────────────────────────────────────
 
@@ -847,14 +874,14 @@
   clearChatBtn.addEventListener('click', function () {
     state.chatMessages = [];
     messagesEl.innerHTML = '';
-    // Restore welcome message
     var welcome = document.createElement('div');
     welcome.className = 'welcome-msg';
     welcome.id = 'welcome-msg';
     welcome.innerHTML =
-      '<p class="welcome-title">Subtext Chat</p>' +
-      '<p class="welcome-body">Chat with a local model. Transcribe something on the Media tab, ' +
-      'then tap <strong>Chat about this →</strong> to ask questions about it.</p>';
+      '<div class="welcome-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>' +
+      '<p class="welcome-title">Chat</p>' +
+      '<p class="welcome-body">Talk to a local model about your transcripts. Transcribe something on Media, ' +
+      'then tap <strong>Chat about this</strong> to load it as context.</p>';
     messagesEl.appendChild(welcome);
   });
 

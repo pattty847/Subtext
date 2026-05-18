@@ -8,7 +8,7 @@ import shutil
 class ProjectPaths:
     """Centralized path management"""
     
-    BASE_DIR = Path.cwd()
+    BASE_DIR = Path(__file__).resolve().parents[2]
     ASSETS_DIR = BASE_DIR / "assets"
     
     # Content directories
@@ -17,6 +17,7 @@ class ProjectPaths:
     ANALYSIS_DIR = ASSETS_DIR / "analysis"
     LOGS_DIR = ASSETS_DIR / "logs"
     RUNTIME_DIR = ASSETS_DIR / "runtime"
+    DOWNLOADS_DIR = BASE_DIR / "Downloads"
     
     @classmethod
     def ensure_directories(cls):
@@ -27,6 +28,7 @@ class ProjectPaths:
             cls.ANALYSIS_DIR,
             cls.LOGS_DIR,
             cls.RUNTIME_DIR,
+            cls.DOWNLOADS_DIR,
         ]:
             path.mkdir(parents=True, exist_ok=True)
     

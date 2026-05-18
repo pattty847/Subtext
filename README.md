@@ -82,7 +82,7 @@ curl http://127.0.0.1:8000/health
 
 ### 5) Publish it privately through Tailscale (recommended)
 
-Subtext listens on **localhost only** (`127.0.0.1:8000`). Tailscale **Serve** exposes that port to your Tailnet with HTTPS and access control — this is the supported “phone from anywhere” path. It is **not** a public-internet deployment; only devices on your Tailnet can reach it.
+Subtext listens on **localhost only** (`127.0.0.1:8000`). Tailscale **Serve** proxies your tailnet to that port — this is the supported “phone from anywhere” path. It is **not** a public-internet deployment; only devices on your Tailnet can reach it.
 
 ```bash
 tailscale serve --bg 8000 http://127.0.0.1:8000
@@ -94,7 +94,9 @@ Then get the Tailnet URL:
 tailscale serve status
 ```
 
-Open the listed Tailnet URL in Safari on your iPhone and enter your `SUBTEXT_SERVER_KEY`.
+**Which URL to use:** open **exactly one of the URLs** printed by `tailscale serve status` (copy from your terminal). Examples look like `http://your-mac.tail-xxxx.ts.net:8000` or `http://your-mac:8000`, with `/` proxied to `http://127.0.0.1:8000`. Different Tailscale versions may show `https://` or a URL without `:8000` — **use whatever your `serve status` lists**; that is the supported entry point. Subtext itself still listens only on loopback; Serve is what makes it reachable from other tailnet devices.
+
+Open that URL in Safari on your iPhone (or any browser on your computer) and enter your `SUBTEXT_SERVER_KEY`.
 
 There is no separate “public” plist or LAN-focused LaunchAgent in this repo on purpose: binding to `0.0.0.0` or same-Wi-Fi URLs is not the default security model.
 
@@ -104,8 +106,57 @@ From Safari on iPhone you can:
 
 - paste a supported media URL and tap `Transcribe`
 - run `Caption Ideas`, `Hook Rewrites`, `Title Pack`, or a custom prompt on the transcript with a selected humor style
+- paste a supported media URL and tap `Download Audio` for the best available audio-only stream
 - paste a supported media URL and tap `Download Video Only`
 - upload a local audio/video file and transcribe it
+
+### Command-Line Access
+
+If the private web service is already running, you can bypass the browser UI and call the same transcribe/download features from the command line. Results are saved to `Downloads/` in the Subtext project folder by default.
+
+```bash
+uv run python -m src.cli transcribe "https://example.com/video"
+uv run python -m src.cli transcribe /path/to/local-audio.m4a
+uv run python -m src.cli download "https://example.com/video"
+uv run python -m src.cli download-audio "https://example.com/video"
+uv run python -m src.cli download-list --audio-only crates/morpher_demo_crate.youtube.urls.txt
+```
+
+The CLI uses `http://127.0.0.1:8000` and `SUBTEXT_SERVER_KEY` automatically. To target a Tailnet URL or another local port:
+
+```bash
+uv run python -m src.cli --server-url "https://your-mac.tail-xxxx.ts.net" --key "$SUBTEXT_SERVER_KEY" transcribe "https://example.com/video"
+```
+
+For scripts running outside the repo folder, keep the project explicit:
+
+```bash
+uv run --directory /Users/copeharder/Programming/Subtext python -m src.cli download "https://example.com/video"
+```
+
+### Demo Crate Helpers
+
+The first Morpher demo crate lives at `crates/morpher_demo_crate.txt`. To check each title against YouTube search metadata and generate review files:
+
+```bash
+uv run python scripts/resolve_youtube_titles.py crates/morpher_demo_crate.txt
+```
+
+This writes:
+
+- `crates/morpher_demo_crate.youtube.tsv` for review
+- `crates/morpher_demo_crate.youtube.jsonl` for scripts
+- `crates/morpher_demo_crate.youtube.urls.txt` for reviewed URL input
+
+Review the candidates before downloading. The resolver picks a top search result; it does not prove that the result is official, licensed, or the best audio source.
+
+To run the reviewed Morpher crate and write the downloaded file paths to text:
+
+```bash
+scripts/download_morpher_crate.sh
+```
+
+That script reads the private web service key from the LaunchAgent at runtime, downloads the best available audio-only stream for each reviewed URL, and writes `crates/morpher_demo_crate.downloaded-files.txt`. It does not store the real key in the repo.
 
 ### Optional: keep the web service always online on macOS (LaunchAgent)
 
@@ -130,7 +181,7 @@ Important:
 - Label in the template: `com.subtext.private-web` (restart with `launchctl kickstart -k gui/$(id -u)/com.subtext.private-web`).
 - Subtext stays bound to `127.0.0.1:8000` by default.
 - Tailscale proxies traffic privately; the service is not exposed on `0.0.0.0`.
-- `http://<tailscale-ip>:8000` is not the recommended access path. Use the Tailnet URL from `tailscale serve status`.
+- Prefer the URL(s) from `tailscale serve status` (hostname form) instead of guessing `http://<100.x.x.x>:8000`, unless you know exactly how your tailnet routes that port.
 
 ## Desktop AI Analysis Setup
 
@@ -215,6 +266,11 @@ uv run python run.py
 
 - Run Desktop app: `uv run python run.py`
 - Run private web service: `uv run python run_web.py`
+- Transcribe from CLI: `uv run python -m src.cli transcribe "<url-or-file>"`
+- Download video from CLI: `uv run python -m src.cli download "<url>"`
+- Download audio from CLI: `uv run python -m src.cli download-audio "<url>"`
+- Download URL list from CLI: `uv run python -m src.cli download-list [--audio-only] "<url-file>"`
+- Resolve demo crate YouTube candidates: `uv run python scripts/resolve_youtube_titles.py crates/morpher_demo_crate.txt`
 - Install faster backend: `uv sync --extra faster`
 - Update dependencies: `uv sync --upgrade`
 - Check Ollama models: `ollama list`

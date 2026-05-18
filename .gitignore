@@ -33,6 +33,7 @@ env/
 *.swo
 *~
 .cursor/
+.codex/
 
 # OS
 .DS_Store
@@ -41,6 +42,7 @@ desktop.ini
 
 # Downloaded content (keep repo clean)
 downloads/
+Downloads/
 *.mp4
 *.mp3
 *.wav
@@ -50,11 +52,19 @@ downloads/
 *.part
 *.ytdl
 
+# Generated crate resolution outputs
+crates/*.youtube.tsv
+crates/*.youtube.jsonl
+crates/*.youtube.urls.txt
+crates/*.downloaded-files.txt
+
 # Transcripts (user-generated content)
 *.txt
 !requirements.txt
 !README.md
 !SPEC.md
+!crates/
+!crates/morpher_demo_crate.txt
 
 # Build artifacts
 *.spec

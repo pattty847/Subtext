@@ -356,6 +356,25 @@ class UniversalDownloader:
         }
         return await self._download_with_options(url, ydl_opts)
 
+    async def download_best_audio(
+        self,
+        url: str,
+        progress_callback: Optional[Callable[[DownloadProgress], None]] = None,
+    ) -> Path:
+        """Download the highest-quality audio-only stream without re-encoding."""
+
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': str(self.output_dir / '%(title).80B [%(id)s].%(ext)s'),
+            'restrictfilenames': True,
+            'windowsfilenames': True,
+            'progress_hooks': [lambda d: self._progress_hook(d, progress_callback)],
+            'quiet': True,
+            'no_warnings': True,
+            'no_color': True,
+        }
+        return await self._download_with_options(url, ydl_opts)
+
 
 async def test_downloader():
     """Test the downloader"""

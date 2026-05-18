@@ -1,0 +1,36 @@
+# Morpher first demo crate
+# One title per line. The resolver script searches YouTube metadata only.
+#
+# Bass is the real exam.
+# For every pairing, listen for:
+# - sub + kick collisions when Deck A vocals sit over Deck B drums/bass
+# - wobble identity surviving stem separation
+# - log-drum / low-percussion pocket staying readable against DnB drums
+# - drop swaps keeping weight without turning into mud
+#
+# First bass trial:
+# Deck A: Wilkinson - Afterglow
+# Deck B: Chase & Status - Take Me Away
+# Goal: keep A emotional vocal, steal B pressure, check whether the low end feels intentional.
+#
+# Bounce/bass trial:
+# Deck A: Tyla - Water
+# Deck B: Sub Focus & Dimension - Ready To Fly
+# Goal: test whether soft vocal/body bounce can survive a DnB lift without the groove collapsing.
+#
+# Rap pressure / attitude trial:
+# Deck A: Young M.A - OOOUUU
+# Deck B: Drake - 0 To 100 / The Catch Up
+# Goal: make Morpher explain swagger by feel, not by text: keep A's blunt, quotable vocal pocket
+# and let B provide the acceleration ramp, polish, and impact-control grid underneath it.
+# This is a "why does this suddenly feel inevitable?" test, not a clean genre blend test.
+Chase & Status - Baddadan
+Chase & Status - Take Me Away
+T & Sugah - The Speaker
+Sub Focus & Dimension - Ready To Fly
+Wilkinson - Afterglow
+Tyla - Water
+Rema - Calm Down
+Major Lazer & DJ Snake ft. MO - Lean On
+Young M.A - OOOUUU
+Drake - 0 To 100 / The Catch Up

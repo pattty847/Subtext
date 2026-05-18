@@ -530,7 +530,30 @@ async def download_video(
     async with service._lock:
         downloaded_path = await service.downloader.download_best_video(cleaned_url)
     media_type, _ = mimetypes.guess_type(downloaded_path.name)
-    LOGGER.info("download_only filename=%s size=%s", downloaded_path.name, downloaded_path.stat().st_size)
+    LOGGER.info("download_video filename=%s size=%s", downloaded_path.name, downloaded_path.stat().st_size)
+
+    return FileResponse(
+        path=downloaded_path,
+        media_type=media_type or "application/octet-stream",
+        filename=downloaded_path.name,
+        background=BackgroundTask(lambda: downloaded_path.unlink(missing_ok=True)),
+    )
+
+
+@app.post("/download-audio")
+async def download_audio(
+    request: Request,
+    url: str = Form(default=""),
+) -> FileResponse:
+    cleaned_url = url.strip()
+    if not cleaned_url:
+        raise HTTPException(status_code=400, detail="URL is required.")
+
+    service: PrivateTranscriptionService = request.app.state.service
+    async with service._lock:
+        downloaded_path = await service.downloader.download_best_audio(cleaned_url)
+    media_type, _ = mimetypes.guess_type(downloaded_path.name)
+    LOGGER.info("download_audio filename=%s size=%s", downloaded_path.name, downloaded_path.stat().st_size)
 
     return FileResponse(
         path=downloaded_path,
