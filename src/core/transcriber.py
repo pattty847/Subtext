@@ -79,7 +79,12 @@ class WhisperTranscriber:
         return "cpu"
 
     def _resolve_backend(self, backend: str) -> str:
-        """Choose an implementation backend with conservative defaults."""
+        """Choose an implementation backend with conservative defaults.
+
+        faster-whisper yields per-segment in ``transcribe_stream``; openai
+        whisper returns the whole result at once. Prefer faster-whisper in
+        auto mode whenever it is installed so the UI actually streams.
+        """
         requested_backend = (backend or "auto").strip().lower()
         if requested_backend not in {"auto", "openai", "faster-whisper"}:
             requested_backend = "auto"
@@ -92,9 +97,15 @@ class WhisperTranscriber:
                 raise RuntimeError(
                     "faster-whisper backend requested but dependency is not installed."
                 )
+            # CTranslate2 doesn't support MPS; coerce to CPU.
+            if self.device == "mps":
+                self.device = "cpu"
             return "faster-whisper"
 
-        if self.device == "cuda" and WhisperModel is not None:
+        if WhisperModel is not None:
+            # CTranslate2 supports cuda and cpu, not mps — coerce when needed.
+            if self.device == "mps":
+                self.device = "cpu"
             return "faster-whisper"
 
         return "openai"
