@@ -42,6 +42,10 @@ from src.web import system_status
 
 ProjectPaths.initialize()
 
+# Register PWA manifest MIME type so /static/manifest.webmanifest serves with
+# the right content-type when iOS Safari probes it for Add-to-Home-Screen.
+mimetypes.add_type("application/manifest+json", ".webmanifest")
+
 LOGGER = logging.getLogger("subtext.private_service")
 TAILSCALE_NETWORK = ipaddress.ip_network("100.64.0.0/10")
 STATIC_DIR = Path(__file__).parent / "static"
@@ -143,6 +147,30 @@ class ChatRequest(BaseModel):
     # When set, the server appends the user prompt + final assistant reply to
     # this thread after streaming completes.
     thread_id: Optional[str] = Field(default=None)
+    # Optional list of data URLs (data:image/...;base64,...) attached to this
+    # turn. Routed only to multimodal-capable providers (LM Studio for now).
+    images: List[str] = Field(default_factory=list)
+
+
+# Soft cap on attached image bytes after base64 decode. Anything beyond this
+# is rejected at the route boundary so a 50 MB screenshot can't OOM the box.
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_IMAGES_PER_TURN = 4
+
+
+def _decode_data_url(url: str) -> bytes:
+    """data:image/png;base64,XXX → raw bytes. Raises ValueError on garbage."""
+    import base64
+    s = (url or "").strip()
+    if not s.startswith("data:"):
+        raise ValueError("image is not a data URL")
+    _, _, payload = s.partition(",")
+    if not payload:
+        raise ValueError("image data URL has no payload")
+    try:
+        return base64.b64decode(payload, validate=False)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"could not decode image: {exc}") from exc
 
 
 class ThreadCreateRequest(BaseModel):
@@ -364,19 +392,28 @@ class PrivateTranscriptionService:
         self,
         messages: List[dict],
         model_id: str,
+        images: Optional[List[bytes]] = None,
     ) -> AsyncGenerator[str, None]:
         """Stream chat tokens from whichever provider ``model_id`` names.
 
         Yields raw token strings; raises RuntimeError on model failure.
         Updates ``_last_chat_activity`` on entry AND exit so the idle
-        watchdog can't unload a model that's actively responding.
+        watchdog can't unload a model that's actively responding. When
+        ``images`` is set, only the LM Studio provider can consume it
+        (Ollama vision is unwired for now and would silently drop them).
         """
         provider, model_name = self.parse_model_id(model_id)
         self._last_chat_activity = time.time()
 
+        if images and provider != "lmstudio":
+            raise RuntimeError(
+                "Image attachments only work with LM Studio multimodal models. "
+                "Pick an LM Studio model and make sure it supports vision."
+            )
+
         if provider == "lmstudio":
             try:
-                async for token in self.lmstudio.stream_chat(messages, model_name):
+                async for token in self.lmstudio.stream_chat(messages, model_name, images=images):
                     yield token
             finally:
                 self._last_chat_activity = time.time()
@@ -1030,6 +1067,26 @@ async def chat_stream(request: Request, payload: ChatRequest) -> StreamingRespon
 
     messages.append({"role": "user", "content": payload.message})
 
+    # Validate + decode any attached images before kicking off the stream.
+    image_bytes: list[bytes] = []
+    if payload.images:
+        if len(payload.images) > MAX_IMAGES_PER_TURN:
+            raise HTTPException(
+                status_code=413,
+                detail=f"At most {MAX_IMAGES_PER_TURN} images per message.",
+            )
+        for url in payload.images:
+            try:
+                raw = _decode_data_url(url)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if len(raw) > MAX_IMAGE_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Image too large; max {MAX_IMAGE_BYTES // (1024 * 1024)} MB after decode.",
+                )
+            image_bytes.append(raw)
+
     # ── CopeNet proxy stub ────────────────────────────────────────────────────
     # TODO: when CopeNet is ready, check config.copenet_api_url here and
     # replace the stream_chat call with an HTTP SSE proxy to CopeNet.
@@ -1043,7 +1100,7 @@ async def chat_stream(request: Request, payload: ChatRequest) -> StreamingRespon
         collected: list[str] = []
         had_error = False
         try:
-            async for token in service.stream_chat(messages, model):
+            async for token in service.stream_chat(messages, model, images=image_bytes or None):
                 collected.append(token)
                 yield _sse_event("token", {"text": token})
             yield _sse_event("done", {})
@@ -1073,11 +1130,12 @@ async def chat_stream(request: Request, payload: ChatRequest) -> StreamingRespon
 
     parsed_provider, parsed_name = service.parse_model_id(model)
     LOGGER.info(
-        "chat_stream provider=%s model=%s history_len=%s has_context=%s thread=%s",
+        "chat_stream provider=%s model=%s history_len=%s has_context=%s images=%s thread=%s",
         parsed_provider,
         parsed_name,
         len(payload.history),
         bool(payload.transcript_context),
+        len(image_bytes),
         payload.thread_id or "-",
     )
 

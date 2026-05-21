@@ -12,8 +12,9 @@ existing Ollama integration pattern in src/web/server.py.
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
-from typing import Any, AsyncGenerator, List, Optional
+from typing import Any, AsyncGenerator, List, Optional, Sequence
 
 import lmstudio as lms
 
@@ -89,20 +90,50 @@ class LMStudioProvider:
         self,
         messages: List[dict],
         model: str,
+        images: Optional[Sequence[bytes]] = None,
     ) -> AsyncGenerator[str, None]:
         """Yield raw token strings from an LM Studio chat completion.
 
         Mirrors PrivateTranscriptionService.stream_chat: yields strings,
-        raises RuntimeError on failure. LM Studio auto-loads the model
-        on first use of `lms.llm(model)`.
+        raises RuntimeError on failure. LM Studio auto-loads the model on
+        first use of `lms.llm(model)`.
+
+        When ``images`` is provided, the bytes are attached to the final
+        user turn via ``Chat.add_user_message(..., images=[...])``. This
+        requires the loaded LM Studio model to be multimodal; non-vision
+        models will return a clear error from the SDK.
         """
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
 
+        image_bytes_list = list(images or [])
+
         def _blocking_stream() -> None:
             try:
                 llm = lms.llm(model)
-                chat = lms.Chat.from_history({"messages": messages})
+
+                if image_bytes_list:
+                    # Vision path — rebuild chat manually so we can attach
+                    # images to the final user message.
+                    chat = lms.Chat()
+                    history = messages[:-1] if messages else []
+                    for msg in history:
+                        role = msg.get("role")
+                        content = msg.get("content", "")
+                        if role == "system":
+                            chat.add_system_prompt(content)
+                        elif role == "assistant":
+                            chat.add_assistant_response(content)
+                        else:
+                            chat.add_user_message(content)
+                    last = messages[-1] if messages else {"role": "user", "content": ""}
+                    handles = [
+                        lms.prepare_image(io.BytesIO(b)) for b in image_bytes_list
+                    ]
+                    chat.add_user_message(last.get("content", ""), images=handles)
+                else:
+                    chat = lms.Chat.from_history({"messages": messages})
+
                 for fragment in llm.respond_stream(chat):
                     content = getattr(fragment, "content", None)
                     if content:

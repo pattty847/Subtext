@@ -325,6 +325,35 @@ textarea { resize: none; line-height: 1.5; }
   background: var(--border-mid);
 }
 
+/* URL row: input + paste button */
+.url-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.url-row input[type="url"] { flex: 1; min-width: 0; }
+
+.url-paste-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border: 1px solid var(--border-mid);
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.url-paste-btn:hover {
+  background: var(--surface-2);
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+.url-paste-btn:active { transform: scale(0.95); }
+
 /* File picker */
 .file-pick {
   display: flex;
@@ -439,6 +468,29 @@ textarea { resize: none; line-height: 1.5; }
   border: 1px solid rgba(248,113,113,0.2);
 }
 .btn-circle--stop:hover { background: rgba(248,113,113,0.18); }
+
+/* Mic / voice input toggle */
+.btn-circle--mic {
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border-mid);
+  width: 40px;
+  height: 40px;
+}
+.btn-circle--mic:hover {
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+.btn-circle--mic.is-recording {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: rgba(248, 113, 113, 0.4);
+  animation: micPulse 1.2s ease-in-out infinite;
+}
+@keyframes micPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.5); }
+  50%      { box-shadow: 0 0 0 6px rgba(248, 113, 113, 0); }
+}
 
 /* ─── Pills ──────────────────────────────────────────────────── */
 .pill-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
@@ -685,6 +737,63 @@ textarea { resize: none; line-height: 1.5; }
 }
 .context-clear-btn:hover { opacity: 1; }
 
+/* ─── Chat: attached image strip ─────────────────────────────── */
+.image-strip {
+  display: flex;
+  gap: 8px;
+  padding: 8px 14px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.image-strip::-webkit-scrollbar { display: none; }
+
+.image-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border-mid);
+  border-radius: var(--r-sm);
+  padding: 4px 28px 4px 4px;
+  max-width: 200px;
+}
+.image-chip img {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.image-chip-label {
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.image-chip-rm {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+.image-chip-rm:hover { color: var(--danger); background: rgba(248,113,113,0.10); }
+
 /* ─── Chat: messages ─────────────────────────────────────────── */
 .messages {
   flex: 1;
@@ -775,6 +884,105 @@ textarea { resize: none; line-height: 1.5; }
   border: 1px solid var(--border-mid);
   border-bottom-left-radius: 4px;
   white-space: pre-wrap;
+}
+
+/* Streaming bubble: raw tokens land as plain text; keep pre-wrap so the
+   typing-cursor sits at the trailing position. Once finalized, we swap
+   to rendered markdown and let normal whitespace flow take over. */
+.bubble--streaming { white-space: pre-wrap; }
+
+.bubble--md { white-space: normal; }
+.bubble--md > *:first-child { margin-top: 0; }
+.bubble--md > *:last-child  { margin-bottom: 0; }
+
+.bubble--md p {
+  margin: 0 0 8px;
+  line-height: 1.55;
+}
+.bubble--md p:last-child { margin-bottom: 0; }
+
+.bubble--md strong { font-weight: 700; color: var(--text); }
+.bubble--md em     { font-style: italic; }
+
+.bubble--md h1, .bubble--md h2, .bubble--md h3,
+.bubble--md h4, .bubble--md h5, .bubble--md h6 {
+  margin: 14px 0 6px;
+  line-height: 1.3;
+  font-weight: 700;
+}
+.bubble--md h1 { font-size: 18px; }
+.bubble--md h2 { font-size: 17px; }
+.bubble--md h3 { font-size: 16px; }
+.bubble--md h4, .bubble--md h5, .bubble--md h6 { font-size: 15px; color: var(--text-2); }
+
+.bubble--md ul, .bubble--md ol {
+  margin: 0 0 8px;
+  padding-left: 22px;
+}
+.bubble--md li { margin: 2px 0; line-height: 1.5; }
+
+.bubble--md code {
+  font-family: var(--mono);
+  font-size: 13px;
+  background: var(--surface-2);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--accent);
+}
+
+.bubble--md pre {
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.bubble--md pre code {
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  display: block;
+  white-space: pre;
+}
+
+.bubble--md a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* Assistant message actions (TTS, future: copy, etc.) */
+.msg-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 0 4px;
+}
+
+.msg-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  border: 1px solid var(--border-mid);
+  border-radius: 6px;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.msg-action-btn:hover { color: var(--accent); border-color: var(--accent-border); }
+.msg-action-btn:active { transform: scale(0.92); }
+
+.msg-action-btn.is-playing {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-muted);
 }
 
 .typing-cursor {
