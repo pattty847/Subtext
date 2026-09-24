@@ -90,6 +90,20 @@ class InputProcessor:
                 result["invalid"].append(item)
         
         return result
+
+    @staticmethod
+    def parse_url_list(input_text: str) -> List[str]:
+        """Extract direct HTTP(S) URLs from free-form pasted text."""
+        urls: List[str] = []
+        seen: set[str] = set()
+
+        for match in re.finditer(r"https?://[^\s,;]+", input_text or "", re.IGNORECASE):
+            url = match.group(0).strip().rstrip(").,;]")
+            if url and url not in seen:
+                urls.append(url)
+                seen.add(url)
+
+        return urls
     
     @staticmethod
     def validate_files(file_paths: List[str]) -> Tuple[List[Path], List[str]]:

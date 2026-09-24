@@ -27,7 +27,7 @@ class DownloadProgress:
 
 
 class UniversalDownloader:
-    YT_COOKIE_BROWSER_ORDER = ("edge", "chrome", "brave", "firefox")
+    YT_COOKIE_BROWSER_ORDER = ("chrome", "brave", "firefox", "edge", "safari")
 
     def __init__(self, output_dir: Optional[Path] = None):
         if output_dir is None:
@@ -73,6 +73,45 @@ class UniversalDownloader:
         """Return True if URL appears to be a YouTube link."""
         lowered = (url or "").lower()
         return "youtube.com" in lowered or "youtu.be" in lowered
+
+    @classmethod
+    def browser_cookie_sources(cls, use_browser_cookies: bool = True) -> list[Optional[str]]:
+        """Return yt-dlp cookie sources, anonymous first."""
+        browser_sources: list[Optional[str]] = [None]
+        if not use_browser_cookies:
+            return browser_sources
+
+        configured = (
+            os.getenv("SUBTEXT_COOKIE_BROWSER", "").strip().lower()
+            or os.getenv("TRANSCRIPTAI_YT_BROWSER", "").strip().lower()
+        )
+        if configured:
+            browser_sources.append(configured)
+            return list(dict.fromkeys(browser_sources))
+        browser_sources.extend(cls.YT_COOKIE_BROWSER_ORDER)
+        return list(dict.fromkeys(browser_sources))
+
+    @classmethod
+    def youtube_caption_cookie_sources(cls, use_browser_cookies: bool = True) -> list[Optional[str]]:
+        """Return yt-dlp cookie sources for YouTube captions, anonymous first."""
+        return cls.browser_cookie_sources(use_browser_cookies)
+
+    @staticmethod
+    def _cookie_file_path() -> Optional[str]:
+        """Return a Netscape-format cookie file path when configured."""
+        for env_name in ("SUBTEXT_COOKIE_FILE", "SUBTEXT_YT_COOKIES"):
+            cookies_file = os.getenv(env_name, "").strip()
+            if cookies_file and Path(cookies_file).exists():
+                return cookies_file
+        return None
+
+    @staticmethod
+    def _is_cookie_source_unavailable_error(error: Exception) -> bool:
+        """Return True when a browser cookie source simply is not usable here."""
+        message = str(error).lower()
+        return (
+            "could not find" in message and "cookies database" in message
+        ) or "cookies.binarycookies" in message or "operation not permitted" in message
 
     @staticmethod
     def _clean_caption_line(line: str) -> str:
@@ -154,17 +193,7 @@ class UniversalDownloader:
             raise Exception("Not a YouTube URL")
 
         loop = asyncio.get_event_loop()
-        browser_sources = [None]
-        if use_browser_cookies:
-            configured = os.getenv("TRANSCRIPTAI_YT_BROWSER", "").strip().lower()
-            browser_sources = []
-            if configured:
-                browser_sources.append(configured)
-            browser_sources.extend(self.YT_COOKIE_BROWSER_ORDER)
-            # remove duplicates while preserving order
-            browser_sources = list(dict.fromkeys(browser_sources))
-            # fallback anonymous attempt at the end
-            browser_sources.append(None)
+        browser_sources = self.youtube_caption_cookie_sources(use_browser_cookies)
 
         def _download_subtitles(cookie_browser: Optional[str]) -> tuple[str, Path]:
             ydl_opts = {
@@ -182,14 +211,14 @@ class UniversalDownloader:
                 "windowsfilenames": True,
                 "restrictfilenames": True,
                 "no_color": True,
+                "noplaylist": True,
             }
             if cookie_browser:
                 ydl_opts["cookiesfrombrowser"] = (cookie_browser,)
             # Support a Netscape-format cookies file for server deployments where
             # browser-based cookie extraction is unavailable.
-            # Set SUBTEXT_YT_COOKIES=/path/to/cookies.txt (exported from your browser).
-            cookies_file = os.getenv("SUBTEXT_YT_COOKIES", "").strip()
-            if cookies_file and Path(cookies_file).exists():
+            cookies_file = self._cookie_file_path()
+            if cookies_file:
                 ydl_opts["cookiefile"] = cookies_file
 
             before_files = {p.resolve() for p in self.transcripts_dir.glob("*")}
@@ -261,6 +290,85 @@ class UniversalDownloader:
             )
         raise Exception(f"YouTube captions unavailable: {msg}")
 
+    async def download_url_captions(
+        self,
+        url: str,
+        include_timestamps: bool = True,
+        use_browser_cookies: bool = False,
+    ) -> tuple[str, Path]:
+        """Download captions exposed by yt-dlp for a generic media URL."""
+        loop = asyncio.get_event_loop()
+
+        def _download_subtitles(cookie_browser: Optional[str]) -> tuple[str, Path]:
+            ydl_opts = {
+                "skip_download": True,
+                "writesubtitles": True,
+                "writeautomaticsub": True,
+                "subtitlesformat": "vtt/srt/best",
+                "subtitleslangs": ["en", "en-orig", "en-US", "en-GB", "en.*"],
+                "outtmpl": str(self.transcripts_dir / "%(title).80B [%(id)s].%(ext)s"),
+                "quiet": True,
+                "noprogress": True,
+                "no_warnings": True,
+                "windowsfilenames": True,
+                "restrictfilenames": True,
+                "no_color": True,
+                "noplaylist": True,
+            }
+            if cookie_browser:
+                ydl_opts["cookiesfrombrowser"] = (cookie_browser,)
+            cookies_file = self._cookie_file_path()
+            if cookies_file:
+                ydl_opts["cookiefile"] = cookies_file
+
+            before_files = {p.resolve() for p in self.transcripts_dir.glob("*")}
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                video_id = str(info.get("id", "")).strip()
+
+            candidates = []
+            for path in self.transcripts_dir.glob("*"):
+                if path.resolve() in before_files:
+                    continue
+                if path.suffix.lower() not in {".vtt", ".srt"}:
+                    continue
+                if video_id and video_id not in path.name:
+                    continue
+                candidates.append(path)
+
+            if not candidates:
+                for path in self.transcripts_dir.glob("*"):
+                    if path.resolve() in before_files:
+                        continue
+                    if path.suffix.lower() in {".vtt", ".srt"}:
+                        candidates.append(path)
+
+            if not candidates:
+                raise Exception("No URL caption track found.")
+
+            caption_path = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+            transcript_text = self.parse_caption_text(caption_path, include_timestamps=include_timestamps)
+            if not transcript_text:
+                raise Exception("Caption file downloaded but produced empty transcript text.")
+
+            output_path = self.transcripts_dir / f"{caption_path.stem}.txt"
+            output_path.write_text(transcript_text, encoding="utf-8")
+            return transcript_text, output_path
+
+        last_error: Optional[Exception] = None
+        for browser in self.browser_cookie_sources(use_browser_cookies):
+            try:
+                return await loop.run_in_executor(None, _download_subtitles, browser)
+            except Exception as error:
+                if browser and self._is_cookie_source_unavailable_error(error):
+                    last_error = error
+                    continue
+                last_error = error
+                break
+
+        msg = str(last_error) if last_error else "unknown subtitle download error"
+        raise Exception(f"URL captions unavailable: {msg}")
+
     @staticmethod
     def _resolve_downloaded_path(download_dir: Path, info: dict, fallback_path: Path) -> Path:
         """Find the final media path after yt-dlp post-processing."""
@@ -294,22 +402,61 @@ class UniversalDownloader:
 
         raise FileNotFoundError("yt-dlp completed but output file could not be found.")
 
+    @staticmethod
+    def _find_recent_output(download_dir: Path, before_files: set[Path]) -> Optional[Path]:
+        """Find the newest file created by this yt-dlp run."""
+        created_files = [
+            path
+            for path in download_dir.glob("*")
+            if path.is_file() and path.resolve() not in before_files
+        ]
+        if not created_files:
+            return None
+        return max(created_files, key=lambda path: path.stat().st_mtime)
+
     async def _download_with_options(
         self,
         url: str,
         ydl_opts: dict,
+        use_browser_cookies: bool = False,
     ) -> Path:
         """Run yt-dlp in a worker thread and return the final media path."""
         loop = asyncio.get_event_loop()
 
-        def _download() -> Path:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        def _download(cookie_browser: Optional[str]) -> Path:
+            run_opts = dict(ydl_opts)
+            run_opts.setdefault("noplaylist", True)
+            if cookie_browser:
+                run_opts["cookiesfrombrowser"] = (cookie_browser,)
+            cookies_file = self._cookie_file_path()
+            if cookies_file:
+                run_opts["cookiefile"] = cookies_file
+
+            before_files = {p.resolve() for p in self.output_dir.glob("*") if p.is_file()}
+            with yt_dlp.YoutubeDL(run_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 prepared_path = Path(ydl.prepare_filename(info))
-                return self._resolve_downloaded_path(self.output_dir, info, prepared_path)
+                try:
+                    return self._resolve_downloaded_path(self.output_dir, info, prepared_path)
+                except FileNotFoundError:
+                    recent_output = self._find_recent_output(self.output_dir, before_files)
+                    if recent_output is not None:
+                        return recent_output
+                    raise
 
+        sources = self.browser_cookie_sources(use_browser_cookies)
+        last_error: Optional[Exception] = None
+        cookie_source_error: Optional[Exception] = None
         try:
-            return await loop.run_in_executor(None, _download)
+            for cookie_browser in sources:
+                try:
+                    return await loop.run_in_executor(None, _download, cookie_browser)
+                except Exception as e:
+                    if cookie_browser and self._is_cookie_source_unavailable_error(e):
+                        cookie_source_error = e
+                        continue
+                    last_error = e
+            raise last_error or cookie_source_error or RuntimeError("unknown yt-dlp error")
         except Exception as e:
             raise Exception(f"Download failed: {str(e)}")
 
@@ -317,6 +464,7 @@ class UniversalDownloader:
         self,
         url: str,
         progress_callback: Optional[Callable[[DownloadProgress], None]] = None,
+        use_browser_cookies: bool = False,
     ) -> Path:
         """Download media for transcription and return the local file path."""
 
@@ -325,17 +473,23 @@ class UniversalDownloader:
             'outtmpl': str(self.output_dir / '%(title).80B [%(id)s].%(ext)s'),
             'restrictfilenames': True,
             'windowsfilenames': True,
+            'noplaylist': True,
             'progress_hooks': [lambda d: self._progress_hook(d, progress_callback)],
             'quiet': True,
             'no_warnings': True,
             'no_color': True,
         }
-        return await self._download_with_options(url, ydl_opts)
+        return await self._download_with_options(
+            url,
+            ydl_opts,
+            use_browser_cookies=use_browser_cookies,
+        )
 
     async def download_best_video(
         self,
         url: str,
         progress_callback: Optional[Callable[[DownloadProgress], None]] = None,
+        use_browser_cookies: bool = False,
     ) -> Path:
         """Download highest quality video with Safari-friendly MP4 preference."""
 
@@ -349,17 +503,23 @@ class UniversalDownloader:
             'outtmpl': str(self.output_dir / '%(title).80B [%(id)s].%(ext)s'),
             'restrictfilenames': True,
             'windowsfilenames': True,
+            'noplaylist': True,
             'progress_hooks': [lambda d: self._progress_hook(d, progress_callback)],
             'quiet': True,
             'no_warnings': True,
             'no_color': True,
         }
-        return await self._download_with_options(url, ydl_opts)
+        return await self._download_with_options(
+            url,
+            ydl_opts,
+            use_browser_cookies=use_browser_cookies,
+        )
 
     async def download_best_audio(
         self,
         url: str,
         progress_callback: Optional[Callable[[DownloadProgress], None]] = None,
+        use_browser_cookies: bool = False,
     ) -> Path:
         """Download the highest-quality audio-only stream without re-encoding."""
 
@@ -368,12 +528,17 @@ class UniversalDownloader:
             'outtmpl': str(self.output_dir / '%(title).80B [%(id)s].%(ext)s'),
             'restrictfilenames': True,
             'windowsfilenames': True,
+            'noplaylist': True,
             'progress_hooks': [lambda d: self._progress_hook(d, progress_callback)],
             'quiet': True,
             'no_warnings': True,
             'no_color': True,
         }
-        return await self._download_with_options(url, ydl_opts)
+        return await self._download_with_options(
+            url,
+            ydl_opts,
+            use_browser_cookies=use_browser_cookies,
+        )
 
 
 async def test_downloader():

@@ -16,6 +16,8 @@ Subtext helps you do two related jobs without sending your media to random web t
 Best when you want an always-on personal media tool you can reach from your phone.
 
 - Paste a supported URL and transcribe it
+- Paste several supported URLs separated by commas or new lines and transcribe them into one combined transcript
+- For YouTube URLs, use available YouTube captions first and only fall back to Whisper when needed
 - Run meme-focused transcript analysis presets from the resulting transcript
 - Paste a supported URL and download the original video
 - Upload a local audio/video file from Safari
@@ -105,6 +107,8 @@ There is no separate “public” plist or LAN-focused LaunchAgent in this repo 
 From Safari on iPhone you can:
 
 - paste a supported media URL and tap `Transcribe`
+- paste several supported media URLs separated by commas, semicolons, or new lines, then tap `Transcribe` to create one combined transcript
+- for YouTube URLs, Subtext tries available YouTube captions before downloading media for Whisper
 - run `Caption Ideas`, `Hook Rewrites`, `Title Pack`, or a custom prompt on the transcript with a selected humor style
 - paste a supported media URL and tap `Download Audio` for the best available audio-only stream
 - paste a supported media URL and tap `Download Video Only`
@@ -281,6 +285,7 @@ uv run python run.py
 
 - `small.en` is the default model because it is a good speed/quality tradeoff for an always-on Apple Silicon service.
 - `gemma3:4b` is the default transcript-analysis model for the private web service and desktop analysis.
+- The private web service tries YouTube captions before Whisper by default. It uses anonymous caption lookup first and avoids browser-cookie extraction unless `SUBTEXT_WEB_YOUTUBE_BROWSER_COOKIES=true` is set. Regular web media downloads and URL transcribes now try anonymous access first, then fall back to browser cookies by default (`SUBTEXT_WEB_MEDIA_BROWSER_COOKIES=true`) for sites like Instagram/X that intermittently require auth. If captions are unavailable, URL-based Whisper fallback is capped at 20 minutes by default so long YouTube videos do not run through Whisper accidentally. Tune with `SUBTEXT_WEB_WHISPER_FALLBACK_MAX_SECONDS`.
 - If installed, `faster-whisper` can be enabled through `uv sync --extra faster`.
 - Whisper device selection is automatic:
   - `cuda` when available

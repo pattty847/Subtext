@@ -331,7 +331,19 @@ textarea { resize: none; line-height: 1.5; }
   gap: 8px;
   align-items: stretch;
 }
-.url-row input[type="url"] { flex: 1; min-width: 0; }
+.url-row textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 54px;
+  max-height: 120px;
+  resize: vertical;
+}
+
+.url-count-hint {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-3);
+}
 
 .url-paste-btn {
   display: inline-flex;

@@ -307,17 +307,7 @@ class OllamaAnalyzer:
         if resolved:
             self.model = resolved
             return True
-
-        try:
-            await asyncio.to_thread(self.client.pull, self.model)
-            resolved = await self.resolve_model_name()
-            if resolved:
-                self.model = resolved
-                return True
-            return False
-        except Exception as e:
-            print(f"Failed to pull model {self.model}: {e}")
-            return False
+        return False
 
     async def _generate_response(self, prompt: str, system_prompt: str = "") -> str:
         try:
@@ -464,7 +454,7 @@ Transcript:
             raise ValueError("Transcript is required for analysis.")
 
         if not await self.ensure_model():
-            raise RuntimeError(f"Model {self.model} is not available and could not be downloaded")
+            raise RuntimeError(f"Model '{self.model}' is not installed or available in Ollama.")
 
         preset = PRESET_REGISTRY.get(preset_name)
         if not preset:

@@ -270,9 +270,9 @@ class WhisperTranscriber:
                 if self.backend == "faster-whisper":
                     segments, _info = self.model.transcribe(
                         str(audio_path),
-                        beam_size=1,
-                        vad_filter=True,
-                        condition_on_previous_text=False,
+                        beam_size=5,
+                        vad_filter=False,
+                        condition_on_previous_text=True,
                     )
                     for segment in segments:
                         text = segment.text.strip()

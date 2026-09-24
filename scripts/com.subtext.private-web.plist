@@ -37,6 +37,8 @@
     <string>small.en</string>
     <key>SUBTEXT_WHISPER_BACKEND</key>
     <string>auto</string>
+    <key>SUBTEXT_COOKIE_BROWSER</key>
+    <string>chrome</string>
     <key>SUBTEXT_SERVER_KEY</key>
     <string>REPLACE_WITH_LONG_RANDOM_VALUE</string>
   </dict>

@@ -14,6 +14,8 @@ It also includes a command-line client for programmatic transcribe/download acce
 ### 1. Private Web Service
 
 - Paste a supported media URL
+- Paste multiple direct media URLs and transcribe them into one combined transcript
+- Use available YouTube captions before Whisper in the private web transcription flow
 - Download the original video to the phone
 - Transcribe a URL or uploaded local media file
 - Run preset transcript analysis modes like caption ideas, hook rewrites, title packs, and custom prompts
@@ -48,6 +50,7 @@ It also includes a command-line client for programmatic transcribe/download acce
 - **Local-first**: keep media processing and AI workflows on the user’s machine
 - **Private by default**: remote access goes through Tailscale, not open internet exposure
 - **Fast enough to feel personal**: warm-model web service for repeat iPhone use
+- **Avoid unnecessary Whisper work**: use YouTube captions first and cap URL-based Whisper fallback for long videos
 - **Clear mode boundaries**: remote convenience plus lightweight preset analysis in web mode, deeper editing/export workflows in desktop mode
 
 ## Primary Workflows
@@ -55,8 +58,8 @@ It also includes a command-line client for programmatic transcribe/download acce
 ### iPhone / Browser Workflow
 
 1. Open the private Subtext URL through Tailscale
-2. Paste a URL or upload a file
-3. Transcribe media or download the original video
+2. Paste one URL, paste multiple direct URLs separated by commas/new lines, or upload a file
+3. Transcribe media into a single transcript result or download one original video
 4. Optionally run transcript analysis presets in-page
 
 ### Command-Line Workflow

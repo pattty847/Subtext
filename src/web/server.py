@@ -12,13 +12,16 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import secrets
+import socket
 import time
 import uuid
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, AsyncGenerator, List, Optional
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
@@ -35,6 +38,7 @@ from src.core.analyzer import (
     OllamaAnalyzer,
 )
 from src.core.downloader import UniversalDownloader
+from src.core.input_processor import InputProcessor
 from src.core.transcriber import WhisperTranscriber
 from src.web.chat_store import ChatStore, transcript_hash as _transcript_hash
 from src.web.llm.lmstudio import LMStudioProvider
@@ -61,10 +65,153 @@ ALLOWED_EXTENSIONS = {
     ".webm",
 }
 WHISPER_MODELS = ["tiny.en", "base.en", "small.en", "medium.en", "large-v3"]
+DEFAULT_WEB_WHISPER_FALLBACK_MAX_SECONDS = 20 * 60
+MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB limit for uploaded audio/video
+
+BLOCKED_IP_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),         # IPv4 loopback
+    ipaddress.ip_network("10.0.0.0/8"),          # RFC 1918 Class A
+    ipaddress.ip_network("172.16.0.0/12"),       # RFC 1918 Class B
+    ipaddress.ip_network("192.168.0.0/16"),      # RFC 1918 Class C
+    ipaddress.ip_network("169.254.0.0/16"),      # Link-local / cloud metadata
+    ipaddress.ip_network("100.64.0.0/10"),       # Tailscale / CGNAT address space
+    ipaddress.ip_network("0.0.0.0/8"),           # Broadcast/current network
+    ipaddress.ip_network("::1/128"),             # IPv6 loopback
+    ipaddress.ip_network("fc00::/7"),            # IPv6 unique local address
+    ipaddress.ip_network("fe80::/10"),           # IPv6 link-local
+]
+
+
+def validate_media_url(raw_url: str) -> str:
+    """Validate that a user-provided URL is a public HTTP/HTTPS URL and not an internal/private address."""
+    url = (raw_url or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required.")
+
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in {"http", "https"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid URL scheme. Only http:// and https:// URLs are allowed.",
+        )
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise HTTPException(status_code=400, detail="Invalid URL: missing hostname.")
+
+    lowered_host = hostname.lower().strip()
+    if (
+        lowered_host in {"localhost", "broadcasthost"}
+        or lowered_host.endswith(".local")
+        or lowered_host.endswith(".internal")
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Access to local or internal network hostnames is prohibited.",
+        )
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not resolve hostname '{hostname}': {exc}",
+        ) from exc
+
+    resolved_ips: set[ipaddress.IPv4Address | ipaddress.IPv6Address] = set()
+    for item in addr_info:
+        ip_str = item[4][0]
+        try:
+            resolved_ips.add(ipaddress.ip_address(ip_str))
+        except ValueError:
+            continue
+
+    if not resolved_ips:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No valid IP addresses found for hostname '{hostname}'.",
+        )
+
+    for ip in resolved_ips:
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            raise HTTPException(
+                status_code=400,
+                detail="Access to private or local network IP addresses is prohibited.",
+            )
+        for net in BLOCKED_IP_NETWORKS:
+            if ip in net:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Access to restricted network IP addresses is prohibited.",
+                )
+
+    return url
 
 
 def _sse_event(event: str, payload: Any) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _batch_heading(index: int, url: str, status: str) -> str:
+    return f"\n\n---\n\n## {index}. {url}\nStatus: {status}\n\n"
+
+
+def _batch_title_from_path(path: Path) -> str:
+    """Use the yt-dlp output filename as a readable title when metadata is unavailable."""
+    raw_title = path.stem.strip()
+    title = re.sub(r"[\s_]*\[[^\]]+\]$", "", raw_title)
+    title = title.replace("_", " ").strip()
+    return title or raw_title or "Untitled media"
+
+
+def _batch_success_section(index: int, url: str, title: str, transcript_text: str) -> str:
+    display_title = title.strip() or url
+    body = transcript_text.strip()
+    return (
+        f"\n\n---\n\n## {index}. {display_title}\n"
+        f"Source: {url}\n"
+        "Status: transcribed\n\n"
+        f"{body}\n"
+    )
+
+
+def _batch_error_section(index: int, url: str, error: str) -> str:
+    return f"{_batch_heading(index, url, 'error')}Error: {error}\n"
+
+
+def _whisper_fallback_limit_seconds(service: Any) -> float:
+    config = getattr(service, "config", None)
+    return float(
+        getattr(
+            config,
+            "web_whisper_fallback_max_seconds",
+            DEFAULT_WEB_WHISPER_FALLBACK_MAX_SECONDS,
+        )
+    )
+
+
+def _web_youtube_captions_enabled(service: Any) -> bool:
+    config = getattr(service, "config", None)
+    return bool(getattr(config, "web_youtube_captions_first", True))
+
+
+def _web_youtube_browser_cookies_enabled(service: Any) -> bool:
+    config = getattr(service, "config", None)
+    return bool(getattr(config, "web_youtube_browser_cookies", False))
+
+
+def _web_media_browser_cookies_enabled(service: Any) -> bool:
+    config = getattr(service, "config", None)
+    return bool(getattr(config, "web_media_browser_cookies", True))
+
+
+def _long_fallback_error(caption_error: Exception, duration: float, max_seconds: float) -> str:
+    max_minutes = int(max_seconds // 60)
+    return (
+        f"YouTube captions unavailable ({caption_error}). "
+        f"Downloaded media is {duration / 60:.1f} minutes, which is above the "
+        f"{max_minutes} minutes Whisper fallback limit."
+    )
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -108,6 +255,19 @@ class ServiceConfig:
             self.transcribe_idle_seconds = max(60, int(os.getenv("SUBTEXT_TRANSCRIBE_IDLE_SECONDS", "600")))
         except ValueError:
             self.transcribe_idle_seconds = 600
+        self.web_youtube_captions_first = _env_flag("SUBTEXT_WEB_YOUTUBE_CAPTIONS_FIRST", True)
+        self.web_youtube_browser_cookies = _env_flag("SUBTEXT_WEB_YOUTUBE_BROWSER_COOKIES", False)
+        self.web_media_browser_cookies = _env_flag("SUBTEXT_WEB_MEDIA_BROWSER_COOKIES", True)
+        try:
+            self.web_whisper_fallback_max_seconds = max(
+                60,
+                int(os.getenv(
+                    "SUBTEXT_WEB_WHISPER_FALLBACK_MAX_SECONDS",
+                    str(DEFAULT_WEB_WHISPER_FALLBACK_MAX_SECONDS),
+                )),
+            )
+        except ValueError:
+            self.web_whisper_fallback_max_seconds = DEFAULT_WEB_WHISPER_FALLBACK_MAX_SECONDS
         self.allowed_ips = {
             entry.strip()
             for entry in os.getenv("SUBTEXT_ALLOWED_IPS", "").split(",")
@@ -239,12 +399,19 @@ class PrivateTranscriptionService:
         temp_path = ProjectPaths.RUNTIME_DIR / f"upload_{uuid.uuid4().hex}{suffix}"
         started_at = time.perf_counter()
 
+        total_bytes = 0
         try:
             with temp_path.open("wb") as handle:
                 while True:
                     chunk = await file.read(1024 * 1024)
                     if not chunk:
                         break
+                    total_bytes += len(chunk)
+                    if total_bytes > MAX_UPLOAD_BYTES:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"Upload exceeds maximum limit of {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+                        )
                     handle.write(chunk)
 
             async with self._lock:
@@ -267,16 +434,17 @@ class PrivateTranscriptionService:
                 LOGGER.warning("cleanup_failed path=%s", temp_path)
 
     async def transcribe_url(self, url: str) -> dict[str, float | str]:
-        cleaned_url = url.strip()
-        if not cleaned_url:
-            raise HTTPException(status_code=400, detail="URL is required.")
+        cleaned_url = validate_media_url(url)
 
         started_at = time.perf_counter()
         downloaded_path: Optional[Path] = None
         try:
             async with self._lock:
                 self._touch_transcribe()
-                downloaded_path = await self.downloader.download(cleaned_url)
+                downloaded_path = await self.downloader.download(
+                    cleaned_url,
+                    use_browser_cookies=_web_media_browser_cookies_enabled(self),
+                )
                 duration = self.transcriber.get_audio_duration(downloaded_path)
                 text = await self.transcriber.transcribe(downloaded_path)
 
@@ -779,13 +947,14 @@ async def download_video(
     request: Request,
     url: str = Form(default=""),
 ) -> FileResponse:
-    cleaned_url = url.strip()
-    if not cleaned_url:
-        raise HTTPException(status_code=400, detail="URL is required.")
+    cleaned_url = validate_media_url(url)
 
     service: PrivateTranscriptionService = request.app.state.service
     async with service._lock:
-        downloaded_path = await service.downloader.download_best_video(cleaned_url)
+        downloaded_path = await service.downloader.download_best_video(
+            cleaned_url,
+            use_browser_cookies=_web_media_browser_cookies_enabled(service),
+        )
     media_type, _ = mimetypes.guess_type(downloaded_path.name)
     LOGGER.info("download_video filename=%s size=%s", downloaded_path.name, downloaded_path.stat().st_size)
 
@@ -802,13 +971,14 @@ async def download_audio(
     request: Request,
     url: str = Form(default=""),
 ) -> FileResponse:
-    cleaned_url = url.strip()
-    if not cleaned_url:
-        raise HTTPException(status_code=400, detail="URL is required.")
+    cleaned_url = validate_media_url(url)
 
     service: PrivateTranscriptionService = request.app.state.service
     async with service._lock:
-        downloaded_path = await service.downloader.download_best_audio(cleaned_url)
+        downloaded_path = await service.downloader.download_best_audio(
+            cleaned_url,
+            use_browser_cookies=_web_media_browser_cookies_enabled(service),
+        )
     media_type, _ = mimetypes.guess_type(downloaded_path.name)
     LOGGER.info("download_audio filename=%s size=%s", downloaded_path.name, downloaded_path.stat().st_size)
 
@@ -837,7 +1007,8 @@ async def transcribe(
         )
 
     if has_url:
-        result = await service.transcribe_url(url)
+        cleaned_url = validate_media_url(url)
+        result = await service.transcribe_url(cleaned_url)
         LOGGER.info(
             "transcribed_url duration=%.3f latency=%.3f chars=%s",
             result["duration"],
@@ -871,7 +1042,16 @@ async def transcribe_stream(request: Request, url: str = Form(default=""), file:
     """
     service: PrivateTranscriptionService = request.app.state.service
 
-    has_url = bool(url.strip())
+    validated_urls: list[str] = []
+    if url.strip():
+        parsed_urls = InputProcessor.parse_url_list(url)
+        if not parsed_urls:
+            validate_media_url(url.strip())
+        for raw_u in parsed_urls:
+            validated_urls.append(validate_media_url(raw_u))
+    urls = validated_urls
+
+    has_url = bool(urls)
     has_file = file is not None and bool(file.filename)
     if has_url == has_file:
         raise HTTPException(
@@ -901,36 +1081,176 @@ async def transcribe_stream(request: Request, url: str = Form(default=""), file:
                 events.append(await progress_queue.get())
             return events
 
+        async def try_available_captions(source_url: str) -> tuple[str, Path, str] | None:
+            if not _web_youtube_captions_enabled(service):
+                return None
+            if service.downloader.is_youtube_url(source_url):
+                caption_text, caption_path = await service.downloader.download_youtube_captions(
+                    source_url,
+                    use_browser_cookies=_web_youtube_browser_cookies_enabled(service),
+                )
+                return caption_text, caption_path, "youtube_captions"
+            caption_text, caption_path = await service.downloader.download_url_captions(
+                source_url,
+                use_browser_cookies=_web_media_browser_cookies_enabled(service),
+            )
+            return caption_text, caption_path, "url_captions"
+
         try:
             if has_url:
-                downloaded_path: Optional[Path] = None
-                try:
-                    async with service._lock:
-                        downloaded_path = await service.downloader.download(url.strip())
-                        duration = service.transcriber.get_audio_duration(downloaded_path)
+                if len(urls) == 1:
+                    downloaded_path: Optional[Path] = None
+                    caption_error: Optional[Exception] = None
+                    try:
+                        try:
+                            async with service._lock:
+                                captions_result = await try_available_captions(urls[0])
+                            if captions_result is not None:
+                                caption_text, _caption_path, caption_source = captions_result
+                                yield _sse_event(
+                                    "progress",
+                                    {
+                                        "stage": "captions",
+                                        "percent": 100.0,
+                                        "message": (
+                                            "Using YouTube captions."
+                                            if caption_source == "youtube_captions"
+                                            else "Using available captions."
+                                        ),
+                                    },
+                                )
+                                yield _sse_event("chunk", {"text": caption_text})
+                                latency = time.perf_counter() - started_at
+                                yield _sse_event(
+                                    "done",
+                                    {
+                                        "duration": 0.0,
+                                        "latency": round(latency, 3),
+                                        "source": caption_source,
+                                    },
+                                )
+                                return
+                        except Exception as error:
+                            caption_error = error
+                            yield _sse_event(
+                                "progress",
+                                {
+                                    "stage": "captions",
+                                    "percent": 0.0,
+                                    "message": "Captions unavailable; checking Whisper fallback...",
+                                },
+                            )
 
-                        async for text_chunk in service.transcriber.transcribe_stream(
-                            downloaded_path,
-                            progress_callback=progress_callback,
-                        ):
-                            for progress_event in await flush_progress_events():
-                                yield _sse_event("progress", progress_event)
-                            if text_chunk:
-                                yield _sse_event("chunk", {"text": text_chunk})
+                        async with service._lock:
+                            downloaded_path = await service.downloader.download(
+                                urls[0],
+                                use_browser_cookies=_web_media_browser_cookies_enabled(service),
+                            )
+                            duration = service.transcriber.get_audio_duration(downloaded_path)
+                            fallback_limit = _whisper_fallback_limit_seconds(service)
+                            if caption_error is not None and duration > fallback_limit:
+                                raise RuntimeError(
+                                    _long_fallback_error(caption_error, duration, fallback_limit)
+                                )
 
-                    for progress_event in await flush_progress_events():
-                        yield _sse_event("progress", progress_event)
+                            async for text_chunk in service.transcriber.transcribe_stream(
+                                downloaded_path,
+                                progress_callback=progress_callback,
+                            ):
+                                for progress_event in await flush_progress_events():
+                                    yield _sse_event("progress", progress_event)
+                                if text_chunk:
+                                    yield _sse_event("chunk", {"text": text_chunk})
+
+                        for progress_event in await flush_progress_events():
+                            yield _sse_event("progress", progress_event)
+                        latency = time.perf_counter() - started_at
+                        yield _sse_event(
+                            "done",
+                            {"duration": round(duration, 3), "latency": round(latency, 3)},
+                        )
+                    finally:
+                        if downloaded_path:
+                            try:
+                                downloaded_path.unlink(missing_ok=True)
+                            except Exception:
+                                LOGGER.warning("cleanup_failed path=%s", downloaded_path)
+                else:
+                    total_duration = 0.0
+                    yield _sse_event("chunk", {"text": "# Batch Transcript\n"})
+                    LOGGER.info("batch_transcribe_start count=%s", len(urls))
+
+                    for index, source_url in enumerate(urls, start=1):
+                        yield _sse_event(
+                            "progress",
+                            {
+                                "stage": "batch",
+                                "percent": round(((index - 1) / len(urls)) * 100, 1),
+                                "message": f"Transcribing {index} of {len(urls)}...",
+                            },
+                        )
+
+                        downloaded_path = None
+                        caption_error = None
+                        try:
+                            try:
+                                async with service._lock:
+                                    captions_result = await try_available_captions(source_url)
+                                if captions_result is not None:
+                                    caption_text, caption_path, _caption_source = captions_result
+                                    section_text = _batch_success_section(
+                                        index,
+                                        source_url,
+                                        _batch_title_from_path(caption_path),
+                                        caption_text,
+                                    )
+                                    yield _sse_event("chunk", {"text": section_text})
+                                    continue
+                            except Exception as error:
+                                caption_error = error
+
+                            async with service._lock:
+                                downloaded_path = await service.downloader.download(
+                                    source_url,
+                                    use_browser_cookies=_web_media_browser_cookies_enabled(service),
+                                )
+                                duration = service.transcriber.get_audio_duration(downloaded_path)
+                                fallback_limit = _whisper_fallback_limit_seconds(service)
+                                if caption_error is not None and duration > fallback_limit:
+                                    raise RuntimeError(
+                                        _long_fallback_error(caption_error, duration, fallback_limit)
+                                    )
+                                total_duration += duration
+                                transcript_text = await service.transcriber.transcribe(downloaded_path)
+
+                            section_text = _batch_success_section(
+                                index,
+                                source_url,
+                                _batch_title_from_path(downloaded_path),
+                                transcript_text,
+                            )
+                            yield _sse_event("chunk", {"text": section_text})
+                        except Exception as error:
+                            yield _sse_event(
+                                "chunk",
+                                {"text": _batch_error_section(index, source_url, str(error))},
+                            )
+                        finally:
+                            if downloaded_path:
+                                try:
+                                    downloaded_path.unlink(missing_ok=True)
+                                except Exception:
+                                    LOGGER.warning("cleanup_failed path=%s", downloaded_path)
+
+                    yield _sse_event(
+                        "progress",
+                        {"stage": "batch", "percent": 100.0, "message": "Batch complete."},
+                    )
                     latency = time.perf_counter() - started_at
                     yield _sse_event(
                         "done",
-                        {"duration": round(duration, 3), "latency": round(latency, 3)},
+                        {"duration": round(total_duration, 3), "latency": round(latency, 3)},
                     )
-                finally:
-                    if downloaded_path:
-                        try:
-                            downloaded_path.unlink(missing_ok=True)
-                        except Exception:
-                            LOGGER.warning("cleanup_failed path=%s", downloaded_path)
 
             else:
                 assert file is not None
@@ -942,12 +1262,19 @@ async def transcribe_stream(request: Request, url: str = Form(default=""), file:
                     )
 
                 temp_path = ProjectPaths.RUNTIME_DIR / f"upload_{uuid.uuid4().hex}{suffix}"
+                total_bytes = 0
                 try:
                     with temp_path.open("wb") as handle:
                         while True:
                             chunk_bytes = await file.read(1024 * 1024)
                             if not chunk_bytes:
                                 break
+                            total_bytes += len(chunk_bytes)
+                            if total_bytes > MAX_UPLOAD_BYTES:
+                                raise HTTPException(
+                                    status_code=413,
+                                    detail=f"Upload exceeds maximum limit of {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+                                )
                             handle.write(chunk_bytes)
 
                     async with service._lock:
