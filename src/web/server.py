@@ -1031,7 +1031,8 @@ async def transcribe(
 
 @app.post("/api/transcribe")
 async def api_transcribe(request: Request, file: UploadFile = File(...)) -> dict[str, float | str]:
-    return await transcribe(request, file=file)
+    # Called as a plain function, so FastAPI will not fill url's Form default.
+    return await transcribe(request, url="", file=file)
 
 
 @app.post("/transcribe/stream")
