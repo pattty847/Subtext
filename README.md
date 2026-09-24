@@ -64,7 +64,7 @@ uv sync --extra faster
 export SUBTEXT_SERVER_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 export SUBTEXT_SERVER_HOST=127.0.0.1
 export SUBTEXT_SERVER_PORT=8000
-export SUBTEXT_MODEL=small.en
+export SUBTEXT_MODEL=large-v3-turbo
 export SUBTEXT_ANALYSIS_MODEL=gemma3:4b
 ```
 
@@ -283,14 +283,12 @@ uv run python run.py
 
 ## Performance Notes
 
-- `small.en` is the default model because it is a good speed/quality tradeoff for an always-on Apple Silicon service.
+- On Apple Silicon, the `auto` backend runs Whisper through MLX on the GPU. `large-v3-turbo` is the recommended model there: on an M4 it transcribes about 15x faster than realtime once warm, with large-v3 accuracy. The first use downloads about 1.6 GB of weights from Hugging Face.
+- `small.en` stays the code default for machines without MLX, where a large model on CPU would be slow.
 - `gemma3:4b` is the default transcript-analysis model for the private web service and desktop analysis.
 - The private web service tries YouTube captions before Whisper by default. It uses anonymous caption lookup first and avoids browser-cookie extraction unless `SUBTEXT_WEB_YOUTUBE_BROWSER_COOKIES=true` is set. Regular web media downloads and URL transcribes now try anonymous access first, then fall back to browser cookies by default (`SUBTEXT_WEB_MEDIA_BROWSER_COOKIES=true`) for sites like Instagram/X that intermittently require auth. If captions are unavailable, URL-based Whisper fallback is capped at 20 minutes by default so long YouTube videos do not run through Whisper accidentally. Tune with `SUBTEXT_WEB_WHISPER_FALLBACK_MAX_SECONDS`.
-- If installed, `faster-whisper` can be enabled through `uv sync --extra faster`.
-- Whisper device selection is automatic:
-  - `cuda` when available
-  - `mps` on supported Apple Silicon setups
-  - `cpu` otherwise
+- `SUBTEXT_WHISPER_BACKEND` chooses the engine: `auto` (default), `mlx`, `faster-whisper`, or `openai`. `auto` picks MLX on Apple Silicon, then faster-whisper, then openai-whisper.
+- Device selection is automatic: MLX uses the Apple GPU, CUDA is used when available, and faster-whisper falls back to CPU on a Mac because it has no Metal support.
 
 ## Troubleshooting
 

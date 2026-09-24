@@ -34,7 +34,7 @@
     <key>SUBTEXT_SERVER_PORT</key>
     <string>8000</string>
     <key>SUBTEXT_MODEL</key>
-    <string>small.en</string>
+    <string>large-v3-turbo</string>
     <key>SUBTEXT_WHISPER_BACKEND</key>
     <string>auto</string>
     <key>SUBTEXT_COOKIE_BROWSER</key>

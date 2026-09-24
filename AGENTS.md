@@ -52,7 +52,7 @@ Do not describe or implement the web service as if it already has full desktop A
 - FastAPI for the private web service
 - AsyncIO + QThread workers
 - yt-dlp for media download/captions
-- Whisper / optional faster-whisper for transcription
+- Whisper for transcription: MLX on Apple Silicon (`auto` default), faster-whisper or openai-whisper elsewhere
 - Ollama for local LLM analysis
 - `uv` for dependency management
 

@@ -3,6 +3,7 @@ Modern audio transcription with Whisper AI.
 """
 import asyncio
 import gc
+from concurrent.futures import ThreadPoolExecutor
 import shutil
 import subprocess
 import threading
@@ -21,6 +22,44 @@ try:
     import torch
 except Exception:  # pragma: no cover
     torch = None
+
+try:
+    import mlx.core as mx
+    import mlx_whisper
+    from mlx_whisper.transcribe import ModelHolder as MLXModelHolder
+except Exception:  # pragma: no cover - only available on Apple Silicon
+    mx = None
+    mlx_whisper = None
+    MLXModelHolder = None
+
+# Short Whisper names -> MLX community repos. Anything containing "/" is
+# treated as an explicit Hugging Face repo and used as-is.
+MLX_MODEL_REPOS = {
+    "turbo": "mlx-community/whisper-large-v3-turbo",
+    "large-v3-turbo": "mlx-community/whisper-large-v3-turbo",
+    "large-v3": "mlx-community/whisper-large-v3-mlx",
+    "large": "mlx-community/whisper-large-v3-mlx",
+    "distil-large-v3": "mlx-community/distil-whisper-large-v3",
+}
+
+
+# MLX binds GPU streams to the thread that created them: weights loaded on one
+# thread and used on another abort the process ("There is no Stream(gpu, 1) in
+# current thread"). Every MLX call runs on this one thread.
+_MLX_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx-whisper")
+
+
+def mlx_available() -> bool:
+    """True when the MLX Whisper backend can run (Apple Silicon + mlx-whisper)."""
+    return mlx_whisper is not None
+
+
+def resolve_mlx_repo(model_name: str) -> str:
+    """Map a Whisper model name to an MLX Hugging Face repo."""
+    name = (model_name or "").strip()
+    if "/" in name:
+        return name
+    return MLX_MODEL_REPOS.get(name, f"mlx-community/whisper-{name}-mlx")
 
 from src.config.paths import ProjectPaths
 
@@ -81,16 +120,27 @@ class WhisperTranscriber:
     def _resolve_backend(self, backend: str) -> str:
         """Choose an implementation backend with conservative defaults.
 
-        faster-whisper yields per-segment in ``transcribe_stream``; openai
-        whisper returns the whole result at once. Prefer faster-whisper in
-        auto mode whenever it is installed so the UI actually streams.
+        Auto prefers MLX on Apple Silicon (runs on the GPU; faster-whisper
+        cannot use Metal and silently drops to CPU there), then
+        faster-whisper, then openai-whisper.
         """
         requested_backend = (backend or "auto").strip().lower()
-        if requested_backend not in {"auto", "openai", "faster-whisper"}:
+        if requested_backend not in {"auto", "openai", "faster-whisper", "mlx"}:
             requested_backend = "auto"
 
         if requested_backend == "openai":
             return "openai"
+
+        if requested_backend == "mlx" or (
+            requested_backend == "auto" and mlx_available() and self.device != "cuda"
+        ):
+            if not mlx_available():
+                raise RuntimeError(
+                    "mlx backend requested but mlx-whisper is not installed "
+                    "(Apple Silicon only)."
+                )
+            self.device = "metal"
+            return "mlx"
 
         if requested_backend == "faster-whisper":
             if WhisperModel is None:
@@ -112,6 +162,8 @@ class WhisperTranscriber:
 
     def _resolve_compute_type(self) -> str:
         """Pick a safe compute type for the chosen device/backend."""
+        if self.backend == "mlx":
+            return "float16"
         if self.backend == "faster-whisper":
             if self.device == "cuda":
                 return "float16"
@@ -138,6 +190,12 @@ class WhisperTranscriber:
         loop = asyncio.get_event_loop()
 
         def _load_model():
+            if self.backend == "mlx":
+                # ModelHolder is mlx_whisper's own cache; warming it here
+                # means transcribe() reuses the loaded weights.
+                return MLXModelHolder.get_model(
+                    resolve_mlx_repo(self.model_name), mx.float16
+                )
             if self.backend == "faster-whisper":
                 assert WhisperModel is not None
                 return WhisperModel(
@@ -147,12 +205,23 @@ class WhisperTranscriber:
                 )
             return whisper.load_model(self.model_name, device=self.device)
 
-        self.model = await loop.run_in_executor(None, _load_model)
+        self.model = await loop.run_in_executor(self._executor(), _load_model)
 
         progress.percent = 100.0
         progress.message = "Model loaded successfully"
         if progress_callback:
             progress_callback(progress)
+
+    def _executor(self) -> Optional[ThreadPoolExecutor]:
+        """The dedicated MLX thread for the mlx backend; the default pool otherwise."""
+        return _MLX_EXECUTOR if self.backend == "mlx" else None
+
+    @staticmethod
+    def _release_mlx_memory() -> None:
+        MLXModelHolder.model = None
+        MLXModelHolder.model_path = None
+        gc.collect()
+        mx.clear_cache()
 
     def unload_model(self):
         """Release loaded Whisper model and clear memory caches."""
@@ -164,6 +233,8 @@ class WhisperTranscriber:
             self.model = None
 
         gc.collect()
+        if self.backend == "mlx" and mx is not None:
+            _MLX_EXECUTOR.submit(self._release_mlx_memory).result()
         if torch is not None and torch.cuda.is_available():
             try:
                 torch.cuda.empty_cache()
@@ -278,6 +349,17 @@ class WhisperTranscriber:
                         text = segment.text.strip()
                         if text:
                             push_chunk(text)
+                elif self.backend == "mlx":
+                    result = mlx_whisper.transcribe(
+                        str(audio_path),
+                        path_or_hf_repo=resolve_mlx_repo(self.model_name),
+                        condition_on_previous_text=True,
+                        verbose=None,
+                    )
+                    for segment in result.get("segments", []):
+                        text = (segment.get("text") or "").strip()
+                        if text:
+                            push_chunk(text)
                 else:
                     result_text = self.model.transcribe(
                         str(audio_path),
@@ -324,7 +406,7 @@ class WhisperTranscriber:
             progress_thread = threading.Thread(target=update_progress_periodically, daemon=True)
             progress_thread.start()
 
-        transcription_future = loop.run_in_executor(None, _transcribe_into_queue)
+        transcription_future = loop.run_in_executor(self._executor(), _transcribe_into_queue)
 
         try:
             while True:

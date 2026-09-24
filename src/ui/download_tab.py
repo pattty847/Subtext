@@ -95,7 +95,7 @@ class DownloadTab(QWidget):
         combo_font = QFont(self.model_combo.font())
         combo_font.setPointSize(10)
         self.model_combo.setFont(combo_font)
-        self.model_combo.addItems(["tiny.en", "base.en", "small.en", "medium.en", "large-v3"])
+        self.model_combo.addItems(["tiny.en", "base.en", "small.en", "medium.en", "large-v3", "large-v3-turbo"])
         self.model_combo.setCurrentText("small.en")
         self.model_combo.setMinimumWidth(150)
         if self.model_combo.view():

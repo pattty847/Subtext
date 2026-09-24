@@ -18,6 +18,7 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "python-multipart",
+    "mlx-whisper>=0.4.3",
 ]
 
 [project.optional-dependencies]

@@ -89,5 +89,5 @@ It also includes a command-line client for programmatic transcribe/download acce
 - **FastAPI**: private web service
 - **PySide6**: desktop application
 - **yt-dlp**: media download and extraction
-- **Whisper / faster-whisper**: transcription
+- **Whisper (MLX on Apple Silicon, faster-whisper or openai-whisper elsewhere)**: transcription
 - **Ollama**: local AI analysis

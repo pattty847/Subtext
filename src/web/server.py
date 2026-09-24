@@ -64,7 +64,7 @@ ALLOWED_EXTENSIONS = {
     ".opus",
     ".webm",
 }
-WHISPER_MODELS = ["tiny.en", "base.en", "small.en", "medium.en", "large-v3"]
+WHISPER_MODELS = ["tiny.en", "base.en", "small.en", "medium.en", "large-v3", "large-v3-turbo"]
 DEFAULT_WEB_WHISPER_FALLBACK_MAX_SECONDS = 20 * 60
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB limit for uploaded audio/video
 
