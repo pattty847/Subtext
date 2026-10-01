@@ -136,28 +136,86 @@ class UniversalDownloader:
             return f"00:{int(mm):02d}:{int(sec):02d}"
         return "00:00:00"
 
+    @staticmethod
+    def _caption_overlap(previous: list[str], current: list[str]) -> int:
+        """Count words shared by the end of a passage and start of a rolling cue."""
+        def comparable(word: str) -> str:
+            return re.sub(r"^\W+|\W+$", "", word).casefold()
+
+        old = [comparable(word) for word in previous]
+        new = [comparable(word) for word in current]
+        for count in range(min(len(old), len(new)), 0, -1):
+            if old[-count:] == new[:count]:
+                return count
+        return 0
+
     def parse_caption_text(self, caption_path: Path, include_timestamps: bool = True) -> str:
         """Parse VTT/SRT captions into clean transcript text."""
         raw = caption_path.read_text(encoding="utf-8", errors="ignore")
         lines = raw.splitlines()
-        parsed_lines = []
+        parsed_lines: list[str] = []
         current_timestamp = ""
-        cue_lines = []
-        last_text = ""
+        current_start = 0.0
+        current_end = 0.0
+        cue_lines: list[str] = []
+        passage_words: list[str] = []
+        passage_timestamp = ""
+        passage_start = 0.0
+        passage_speaker = ""
+        previous_end = 0.0
 
-        def flush_cue():
-            nonlocal cue_lines, last_text
+        def flush_passage() -> None:
+            nonlocal passage_words
+            if not passage_words:
+                return
+            spoken = " ".join(passage_words)
+            if passage_speaker:
+                spoken = f"{passage_speaker}: {spoken}"
+            if include_timestamps and passage_timestamp:
+                parsed_lines.append(f"[{passage_timestamp}] {spoken}")
+            else:
+                parsed_lines.append(spoken)
+            passage_words = []
+
+        def flush_cue() -> None:
+            nonlocal cue_lines, passage_words, passage_timestamp
+            nonlocal passage_start, passage_speaker, previous_end
             if not cue_lines:
                 return
-            joined = self._clean_caption_line(" ".join(cue_lines))
+            cue_raw = " ".join(cue_lines)
             cue_lines = []
-            if not joined or joined == last_text:
+            speaker_match = re.search(r"<v\s+([^>]+)>", cue_raw, flags=re.IGNORECASE)
+            speaker = self._clean_caption_line(speaker_match.group(1)) if speaker_match else ""
+            words = self._clean_caption_line(cue_raw).split()
+            if not words:
                 return
-            last_text = joined
-            if include_timestamps and current_timestamp:
-                parsed_lines.append(f"[{current_timestamp}] {joined}")
+
+            nearby = current_start <= previous_end + 2.0
+            same_speaker = not (speaker and passage_speaker and speaker != passage_speaker)
+            overlap = self._caption_overlap(passage_words, words) if nearby and same_speaker else 0
+            new_words = words[overlap:]
+            start_new_passage = not overlap or (current_start - passage_start >= 20.0 and bool(new_words))
+            if passage_words and start_new_passage:
+                flush_passage()
+                words = new_words if overlap else words
+            if not passage_words:
+                if not words:
+                    previous_end = current_end
+                    return
+                passage_timestamp = current_timestamp
+                passage_start = current_start
+                passage_speaker = speaker
+                passage_words.extend(words)
             else:
-                parsed_lines.append(joined)
+                if speaker and not passage_speaker:
+                    passage_speaker = speaker
+                for index in range(overlap):
+                    old_word = passage_words[-overlap + index]
+                    new_word = words[index]
+                    if re.search(r"[^\w]$", new_word) and not re.search(r"[^\w]$", old_word):
+                        passage_words[-overlap + index] = new_word
+                passage_words.extend(new_words)
+            previous_end = current_end
 
         for line in lines:
             stripped = line.strip()
@@ -172,12 +230,19 @@ class UniversalDownloader:
                 continue
             if "-->" in stripped:
                 flush_cue()
-                start = stripped.split("-->", 1)[0].strip()
+                start, end = (part.strip().split()[0] for part in stripped.split("-->", 1))
                 current_timestamp = self._normalize_timestamp(start)
+                def seconds(value: str) -> float:
+                    parts = [float(part.replace(",", ".")) for part in value.split(":")]
+                    return sum(part * 60 ** index for index, part in enumerate(reversed(parts)))
+
+                current_start = seconds(start)
+                current_end = seconds(end)
                 continue
             cue_lines.append(stripped)
 
         flush_cue()
+        flush_passage()
         return "\n".join(parsed_lines).strip()
 
     async def download_youtube_captions(
@@ -228,14 +293,16 @@ class UniversalDownloader:
 
             candidates = []
             for path in self.transcripts_dir.glob("*"):
-                if path.resolve() in before_files:
-                    continue
                 if path.suffix.lower() not in {".vtt", ".srt"}:
                     continue
                 name = path.name
                 # video_id appears literally in the filename regardless of whether
                 # restrictfilenames replaced surrounding brackets with underscores
                 if video_id and video_id not in name:
+                    continue
+                # yt-dlp may reuse or overwrite a subtitle file from an earlier run.
+                # A matching video ID makes that cached file safe to parse again.
+                if not video_id and path.resolve() in before_files:
                     continue
                 candidates.append(path)
 

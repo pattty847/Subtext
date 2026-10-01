@@ -108,7 +108,7 @@ From Safari on iPhone you can:
 
 - paste a supported media URL and tap `Transcribe`
 - paste several supported media URLs separated by commas, semicolons, or new lines, then tap `Transcribe` to create one combined transcript
-- for YouTube URLs, Subtext tries available YouTube captions before downloading media for Whisper
+- for YouTube URLs, Subtext tries available YouTube captions before downloading media for Whisper; rolling auto captions are merged into readable timestamped passages, including when caption files were saved by an earlier run
 - run `Caption Ideas`, `Hook Rewrites`, `Title Pack`, or a custom prompt on the transcript with a selected humor style
 - paste a supported media URL and tap `Download Audio` for the best available audio-only stream
 - paste a supported media URL and tap `Download Video Only`

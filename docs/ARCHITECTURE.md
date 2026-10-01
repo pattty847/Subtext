@@ -73,7 +73,8 @@ For each queue item:
 5. Save transcript and emit completion signals
 
 Notes:
-- Caption requests use retry/backoff + optional browser cookies.
+- Caption requests use retry/backoff + optional browser cookies and can reuse a saved caption file that matches the same YouTube video ID.
+- The shared caption parser merges overlapping rolling VTT/SRT cues, retains speaker labels when present, and starts a new timestamped passage after about 20 seconds of continuous new words.
 - The private web service uses the captions-first path for streamed YouTube URL transcription, tries anonymous caption lookup before browser cookies, enables browser-cookie fallback for general web media downloads/transcribes, and blocks long URL-based Whisper fallback above the configured cap.
 - Batch processing is sequential (intentional for memory stability).
 - Whisper device is auto-selected (`cuda` -> `mps` -> `cpu` fallback).
