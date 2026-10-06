@@ -59,6 +59,9 @@
   const copyBtn             = $('copy-btn');
   const downloadTxtBtn      = $('download-txt-btn');
   const chatCtxBtn          = $('chat-ctx-btn');
+  const sendChatgptBtn      = $('send-chatgpt-btn');
+  const sendClaudeBtn       = $('send-claude-btn');
+  const sendMuseBtn         = $('send-muse-btn');
 
   // Chat page
   const chatModelSelect     = $('chat-model-select');
@@ -745,6 +748,51 @@
       setTimeout(function () { copyBtn.textContent = original; }, 2000);
     });
   });
+
+  // ─── Media: AI handoff buttons ────────────────────────────────────────────
+  //
+  // ChatGPT accepts a prefilled prompt via its (undocumented, may-change)
+  // `?prompt=` parameter (`?q=` is older and flakier). Claude and Muse have
+  // no documented prefill URL, so the transcript is copied to the clipboard
+  // and the site opens for pasting. window.open() must stay in the click's
+  // synchronous call stack or popup blockers will eat it — so open first,
+  // then copy as the backup.
+
+  var AI_HANDOFF_MAX_URL = 6000;  // guard: fall back to copy+open above this
+
+  function handoffTranscript(target) {
+    var text = transcriptOutput.value;
+    if (!text) { toast('Nothing to send yet'); return; }
+
+    var dest, copyMsg;
+    if (target === 'chatgpt') {
+      var prefilled = 'https://chatgpt.com/?prompt=' + encodeURIComponent(text);
+      if (prefilled.length <= AI_HANDOFF_MAX_URL) {
+        dest = prefilled;
+        copyMsg = 'Opening ChatGPT with the transcript — it is also copied as a backup';
+      } else {
+        dest = 'https://chatgpt.com/';
+        copyMsg = 'Transcript too long for a link — copied, paste it into ChatGPT';
+      }
+    } else if (target === 'claude') {
+      dest = 'https://claude.ai/new';
+      copyMsg = 'Transcript copied — paste it into Claude';
+    } else {
+      dest = 'https://muse.ai/';
+      copyMsg = 'Transcript copied — paste it into Muse';
+    }
+
+    window.open(dest, '_blank', 'noopener');
+    copyToClipboard(text).then(function () {
+      toast(copyMsg);
+    }).catch(function () {
+      toast('Copy failed — long-press the text to copy manually');
+    });
+  }
+
+  sendChatgptBtn.addEventListener('click', function () { handoffTranscript('chatgpt'); });
+  sendClaudeBtn.addEventListener('click', function () { handoffTranscript('claude'); });
+  sendMuseBtn.addEventListener('click', function () { handoffTranscript('muse'); });
 
   // ─── Media: download transcript as .txt ───────────────────────────────────
 
