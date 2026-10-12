@@ -610,6 +610,13 @@ textarea { resize: none; line-height: 1.5; }
   gap: 8px;
 }
 
+.handoff-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border-strong);
+  margin: 6px 2px;
+}
+
 /* ─── Section label ──────────────────────────────────────────── */
 .section-label {
   margin: 0 0 12px;
