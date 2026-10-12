@@ -112,6 +112,7 @@ From Safari on iPhone you can:
 - run `Caption Ideas`, `Hook Rewrites`, `Title Pack`, or a custom prompt on the transcript with a selected humor style
 - paste a supported media URL and tap `Download Audio` for the best available audio-only stream
 - paste a supported media URL and tap `Download Video Only`
+- open the `IG` tab, paste Instagram post/reel links, and tap thumbnails to select the ones to batch-download as a zip
 - upload a local audio/video file and transcribe it
 
 ### Command-Line Access

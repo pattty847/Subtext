@@ -114,6 +114,7 @@
 
   // Nav
   const navMedia            = $('nav-media');
+  const navIg               = $('nav-ig');
   const navChat             = $('nav-chat');
 
   // ─── Utilities ────────────────────────────────────────────────────────────
@@ -329,7 +330,7 @@
       target.removeAttribute('aria-hidden');
     }
 
-    [navMedia, navChat].forEach(function (btn) {
+    [navMedia, navIg, navChat].forEach(function (btn) {
       var active = btn.dataset.page === page;
       btn.classList.toggle('active', active);
       btn.setAttribute('aria-current', active ? 'page' : 'false');
@@ -343,6 +344,7 @@
 
   navMedia.addEventListener('click', function () { switchPage('media'); });
   navChat.addEventListener('click', function () { switchPage('chat'); });
+  navIg.addEventListener('click', function () { switchPage('ig'); });
 
   // ─── Key drawer ───────────────────────────────────────────────────────────
 
@@ -1809,6 +1811,218 @@
   modelsRefreshBtn.addEventListener('click', refreshModelsSheet);
 
   // ─── Boot ─────────────────────────────────────────────────────────────────
+
+
+  // ─── IG grid ────────────────────────────────────────────────────────────
+  //
+  // Paste Instagram post/reel links -> server resolves thumbnails -> tap to
+  // select -> batch download as a zip. Post *lists* cannot be fetched on the
+  // box (see src/core/instagram_grid.py), so links come from the user or
+  // from chat with an agent that has Instagram access.
+
+  const igForm              = $('ig-form');
+  const igUrlInput          = $('ig-url-input');
+  const igCountHint         = $('ig-count-hint');
+  const igLoadBtn           = $('ig-load-btn');
+  const igClearBtn          = $('ig-clear-btn');
+  const igStatusCard        = $('ig-status-card');
+  const igStatusText        = $('ig-status-text');
+  const igToolbar           = $('ig-toolbar');
+  const igSelectedCount     = $('ig-selected-count');
+  const igSelectAllBtn      = $('ig-select-all-btn');
+  const igDownloadBtn       = $('ig-download-btn');
+  const igGrid              = $('ig-grid');
+  const igEmpty             = $('ig-empty');
+
+  var igPosts = [];   // [{shortcode, url, title, caption, ok, error, thumb, selected}]
+  var igBusy = false;
+
+  function igShowStatus(msg) {
+    igStatusText.textContent = msg;
+    igStatusCard.classList.remove('hidden');
+  }
+  function igHideStatus() { igStatusCard.classList.add('hidden'); }
+
+  function igUpdateCountHint() {
+    var n = parseUrlsFromText(igUrlInput.value).length;
+    if (n > 0) {
+      igCountHint.textContent = n === 1 ? '1 link detected' : n + ' links detected';
+      igCountHint.classList.remove('hidden');
+    } else {
+      igCountHint.classList.add('hidden');
+    }
+  }
+
+  function igSelected() {
+    return igPosts.filter(function (post) { return post.selected && post.ok; });
+  }
+
+  function igRenderToolbar() {
+    var n = igSelected().length;
+    igToolbar.classList.toggle('hidden', igPosts.length === 0);
+    igSelectedCount.textContent = n === 1 ? '1 selected' : n + ' selected';
+    igDownloadBtn.disabled = igBusy || n === 0;
+    igDownloadBtn.textContent = n > 0 ? 'Download (' + n + ')' : 'Download';
+  }
+
+  function igCardLabel(post) {
+    if (!post.ok) return post.error || 'Could not load this post.';
+    return post.caption || post.title || 'Instagram post';
+  }
+
+  function igRenderGrid() {
+    igGrid.innerHTML = '';
+    igEmpty.classList.toggle('hidden', igPosts.length > 0);
+    igPosts.forEach(function (post) {
+      var card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'ig-card' + (post.selected ? ' selected' : '') + (post.ok ? '' : ' ig-card--error');
+      card.setAttribute('aria-pressed', post.selected ? 'true' : 'false');
+
+      if (post.thumb) {
+        var img = document.createElement('img');
+        img.className = 'ig-thumb';
+        img.alt = '';
+        img.loading = 'lazy';
+        // Same-origin: the subtext_key cookie authenticates the thumbnail fetch.
+        img.src = post.thumb;
+        card.appendChild(img);
+      } else {
+        var missing = document.createElement('div');
+        missing.className = 'ig-thumb';
+        missing.setAttribute('aria-hidden', 'true');
+        card.appendChild(missing);
+      }
+
+      var badge = document.createElement('span');
+      badge.className = 'ig-check';
+      badge.setAttribute('aria-hidden', 'true');
+      badge.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+      card.appendChild(badge);
+
+      var cap = document.createElement('span');
+      cap.className = 'ig-cap';
+      cap.textContent = igCardLabel(post);
+      card.appendChild(cap);
+
+      card.addEventListener('click', function () {
+        if (!post.ok || igBusy) return;
+        post.selected = !post.selected;
+        card.classList.toggle('selected', post.selected);
+        card.setAttribute('aria-pressed', post.selected ? 'true' : 'false');
+        igRenderToolbar();
+      });
+      igGrid.appendChild(card);
+    });
+    igRenderToolbar();
+  }
+
+  async function igLoadGrid(evt) {
+    if (evt) evt.preventDefault();
+    if (igBusy) return;
+    if (!state.apiKey) { igShowStatus('Enter the shared key first.'); return; }
+    var urls = parseUrlsFromText(igUrlInput.value);
+    if (!urls.length) { igShowStatus('Paste at least one Instagram link.'); return; }
+
+    igBusy = true;
+    igLoadBtn.disabled = true;
+    igShowStatus('Loading grid…');
+    try {
+      var res = await fetch('/ig/grid', {
+        method: 'POST',
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ urls: urls }),
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (!res.ok) throw new Error(data.detail || 'Could not load the grid.');
+      igPosts = (data.posts || []).map(function (item) {
+        return {
+          shortcode: item.shortcode,
+          url: item.url,
+          title: item.title || '',
+          caption: item.caption || '',
+          ok: !!item.ok,
+          error: item.error || '',
+          thumb: item.thumb || null,
+          selected: false,
+        };
+      });
+      igRenderGrid();
+      var failed = igPosts.filter(function (post) { return !post.ok; }).length;
+      var msg = igPosts.length + ' post' + (igPosts.length === 1 ? '' : 's') + ' loaded.';
+      if (data.skipped) msg += ' ' + data.skipped + ' skipped (not IG links).';
+      if (failed) msg += ' ' + failed + ' failed to load.';
+      igShowStatus(msg);
+      setTimeout(igHideStatus, 4000);
+    } catch (err) {
+      igShowStatus(err.message || 'Could not load the grid.');
+    } finally {
+      igBusy = false;
+      igLoadBtn.disabled = false;
+      igRenderToolbar();
+    }
+  }
+
+  async function igDownloadSelected() {
+    var selected = igSelected();
+    if (!selected.length || igBusy) return;
+    if (!state.apiKey) { igShowStatus('Enter the shared key first.'); return; }
+
+    igBusy = true;
+    igRenderToolbar();
+    igShowStatus('Downloading ' + selected.length + ' post' + (selected.length === 1 ? '' : 's') + '…');
+    try {
+      var res = await fetch('/ig/download', {
+        method: 'POST',
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ urls: selected.map(function (post) { return post.url; }) }),
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (!res.ok) throw new Error(data.detail || 'Download failed.');
+      if (!data.zip) throw new Error('Server did not return a download.');
+
+      var zipRes = await fetch(data.zip, { headers: apiHeaders({}) });
+      if (!zipRes.ok) throw new Error('Could not fetch the download.');
+      var blob = await zipRes.blob();
+      var objUrl = URL.createObjectURL(blob);
+      var anchor = document.createElement('a');
+      anchor.href = objUrl;
+      anchor.download = filenameFromCD(zipRes.headers.get('Content-Disposition')) || 'instagram_posts.zip';
+      anchor.style.display = 'none';
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      setTimeout(function () { URL.revokeObjectURL(objUrl); }, 5000);
+
+      var okCount = (data.downloaded || []).length;
+      var failedCount = (data.failed || []).length;
+      igShowStatus('Downloaded ' + okCount + ' of ' + selected.length + '.' +
+        (failedCount ? ' ' + failedCount + ' failed.' : ''));
+      toast('Saved ' + okCount + ' post' + (okCount === 1 ? '' : 's'));
+    } catch (err) {
+      igShowStatus(err.message || 'Download failed.');
+    } finally {
+      igBusy = false;
+      setTimeout(igHideStatus, 5000);
+      igRenderToolbar();
+    }
+  }
+
+  igForm.addEventListener('submit', igLoadGrid);
+  igUrlInput.addEventListener('input', igUpdateCountHint);
+  igClearBtn.addEventListener('click', function () {
+    igUrlInput.value = '';
+    igPosts = [];
+    igUpdateCountHint();
+    igRenderGrid();
+    igHideStatus();
+  });
+  igSelectAllBtn.addEventListener('click', function () {
+    var anyUnselected = igPosts.some(function (post) { return post.ok && !post.selected; });
+    igPosts.forEach(function (post) { if (post.ok) post.selected = anyUnselected; });
+    igRenderGrid();
+  });
+  igDownloadBtn.addEventListener('click', igDownloadSelected);
 
   function init() {
     var stored = localStorage.getItem(STORAGE_KEY) || '';
