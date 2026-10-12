@@ -17,6 +17,7 @@ It also includes a command-line client for programmatic transcribe/download acce
 - Paste multiple direct media URLs and transcribe them into one combined transcript
 - Use available YouTube captions before Whisper in the private web transcription flow
 - Download the original video to the phone
+- Paste Instagram post/reel links, browse the thumbnail grid, and batch-download selected posts as a zip
 - Transcribe a URL or uploaded local media file
 - Run preset transcript analysis modes like caption ideas, hook rewrites, title packs, and custom prompts
 - Reach the service privately through Tailscale

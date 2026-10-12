@@ -141,6 +141,53 @@
 
     </section><!-- /page-media -->
 
+    <!-- ── Page: IG grid ──────────────────────────────────────────── -->
+    <section class="page" id="page-ig" role="main" aria-label="IG grid" aria-hidden="true">
+
+      <div class="media-layout">
+        <div class="media-col media-col--input">
+
+          <form id="ig-form" class="media-form" novalidate>
+            <div class="field">
+              <label class="field-label" for="ig-url-input">Instagram links</label>
+              <textarea id="ig-url-input"
+                        placeholder="Paste Instagram post or reel links, one per line…"
+                        autocomplete="off" autocapitalize="off" spellcheck="false"
+                        rows="3"></textarea>
+              <div id="ig-count-hint" class="url-count-hint hidden">1 link detected</div>
+            </div>
+            <div class="action-row">
+              <button id="ig-load-btn" class="btn btn-primary" type="submit">Load grid</button>
+              <button id="ig-clear-btn" class="btn btn-secondary" type="button">Clear</button>
+            </div>
+          </form>
+
+          <!-- Status -->
+          <div class="status-inline hidden" id="ig-status-card" aria-live="polite">
+            <span class="pulse-ring"></span>
+            <span id="ig-status-text">Loading…</span>
+          </div>
+
+        </div><!-- /.media-col--input -->
+
+        <div class="media-col media-col--output">
+
+          <div class="ig-toolbar hidden" id="ig-toolbar">
+            <span id="ig-selected-count" class="ig-selected-count">0 selected</span>
+            <div class="ig-toolbar-actions">
+              <button id="ig-select-all-btn" class="btn btn-secondary btn-sm" type="button">Select all</button>
+              <button id="ig-download-btn" class="btn btn-accent btn-sm" type="button">Download</button>
+            </div>
+          </div>
+
+          <div class="ig-grid" id="ig-grid"></div>
+          <div class="ig-empty" id="ig-empty">Paste some Instagram links and hit Load grid.</div>
+
+        </div><!-- /.media-col--output -->
+      </div><!-- /.media-layout -->
+
+    </section><!-- /page-ig -->
+
     <!-- ── Page: Chat ────────────────────────────────────────────── -->
     <section class="page" id="page-chat" role="main" aria-label="Chat" aria-hidden="true">
 
@@ -366,6 +413,12 @@
         <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
       </svg>
       <span>Media</span>
+    </button>
+    <button class="nav-btn" id="nav-ig" data-page="ig">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+      </svg>
+      <span>IG</span>
     </button>
     <button class="nav-btn" id="nav-chat" data-page="chat">
       <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">

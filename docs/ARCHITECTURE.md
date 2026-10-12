@@ -29,6 +29,7 @@ Input URLs/files -> Download/Captions -> Transcription -> LLM Analysis -> Export
 
 - `input_processor.py`: parse/validate mixed URL + file input
 - `downloader.py`: media downloads + YouTube caption retrieval and parsing
+- `instagram_grid.py`: Instagram post-grid helpers — shortcode parsing, per-post `og:image` thumbnail fetch with disk cache (profile pages are login-walled, so the client supplies post URLs)
 - `transcriber.py`: Whisper model loading/transcription/saving
 - `analyzer.py`: shared Ollama model management + transcript analysis presets
 - `processor.py`: orchestration across downloader/transcriber with fallback paths
@@ -116,7 +117,7 @@ AnalysisTab.analysis_completed -> MainWindow -> ResultsTab.load_results
 
 ## Web Layer (`src/web`)
 
-- `server.py`: FastAPI private service; POST `/transcribe` for synchronous URL or upload transcription, POST `/transcribe/stream` for streamed single URL/file transcription and sequential multi-URL combined transcripts, POST `/download-video` for attachment-style media download, POST `/analyze` for on-demand transcript analysis, GET `/analysis/meta` for preset/model metadata, and GET `/health` for health checks. Streamed YouTube URL requests try yt-dlp captions first, then fall back to media download + Whisper only when captions are unavailable and the URL media duration is within the configured fallback cap. Uploaded media is transcribed directly, Whisper loads once at startup, and all heavy work is serialized behind one async lock.
+- `server.py`: FastAPI private service; POST `/transcribe` for synchronous URL or upload transcription, POST `/transcribe/stream` for streamed single URL/file transcription and sequential multi-URL combined transcripts, POST `/download-video` for attachment-style media download, POST `/ig/grid` + GET `/ig/thumb/{shortcode}` for Instagram thumbnail grids, POST `/ig/download` + GET `/ig/batch/{token}` for batch Instagram downloads as a single-use zip, POST `/analyze` for on-demand transcript analysis, GET `/analysis/meta` for preset/model metadata, and GET `/health` for health checks. Streamed YouTube URL requests try yt-dlp captions first, then fall back to media download + Whisper only when captions are unavailable and the URL media duration is within the configured fallback cap. Uploaded media is transcribed directly, Whisper loads once at startup, and all heavy work is serialized behind one async lock.
 - `static/`: Mobile-first page for iPhone Safari/Shortcuts workflows. Supports one media URL, pasted batches of direct media URLs for one combined transcript, local audio/video upload, URL-only download mode for saving video to the phone, and on-page transcript analysis presets after a transcript is available.
 - Launched with `run_web.py` (uvicorn on `127.0.0.1:8000` by default). Intended to sit behind Tailscale Serve or another loopback-only private proxy instead of binding to all interfaces.
 - `src/cli.py`: non-browser client for the same running service; it does not load its own Whisper model or duplicate web-service business logic.
