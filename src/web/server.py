@@ -14,9 +14,11 @@ import mimetypes
 import os
 import re
 import secrets
+import shutil
 import socket
 import time
 import uuid
+import zipfile
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -38,6 +40,7 @@ from src.core.analyzer import (
     OllamaAnalyzer,
 )
 from src.core.downloader import UniversalDownloader
+from src.core import instagram_grid
 from src.core.input_processor import InputProcessor
 from src.core.transcriber import WhisperTranscriber
 from src.web.chat_store import ChatStore, transcript_hash as _transcript_hash
@@ -337,6 +340,38 @@ class ThreadCreateRequest(BaseModel):
     transcript_context: Optional[str] = Field(default=None)
     title: str = Field(default="")
     model: str = Field(default="")
+
+
+class IGGridRequest(BaseModel):
+    urls: List[str] = Field(default_factory=list)
+
+
+class IGDownloadRequest(BaseModel):
+    urls: List[str] = Field(default_factory=list)
+
+
+IG_BATCH_MAX_POSTS = 10
+IG_BATCH_ZIP_TTL_SECONDS = 2 * 60 * 60
+
+
+def _ig_batch_dir() -> Path:
+    batch_dir = ProjectPaths.RUNTIME_DIR / "ig_batch"
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    return batch_dir
+
+
+def _sweep_stale_ig_batches(batch_dir: Path) -> None:
+    """Best-effort removal of batch zips older than the TTL."""
+    cutoff = time.time() - IG_BATCH_ZIP_TTL_SECONDS
+    try:
+        for zip_path in batch_dir.glob("*.zip"):
+            try:
+                if zip_path.stat().st_mtime < cutoff:
+                    zip_path.unlink(missing_ok=True)
+            except OSError:
+                continue
+    except OSError:
+        pass
 
 
 class AnalysisMetaResponse(BaseModel):
@@ -987,6 +1022,152 @@ async def download_audio(
         media_type=media_type or "application/octet-stream",
         filename=downloaded_path.name,
         background=BackgroundTask(lambda: downloaded_path.unlink(missing_ok=True)),
+    )
+
+
+# ── Instagram grid ──────────────────────────────────────────────────────
+#
+# Paste IG post/reel links -> thumbnail grid -> tap to select -> batch
+# download as a zip. Post *lists* cannot be fetched on the box (profile pages
+# are login-walled and yt-dlp's instagram:user extractor is marked broken),
+# so the client supplies the URLs; an agent with Instagram access (or the
+# Instagram app's share sheet) is the usual source.
+@app.post("/ig/grid")
+async def ig_grid(request: Request, payload: IGGridRequest) -> dict[str, Any]:
+    raw_urls = [(url or "").strip() for url in payload.urls if (url or "").strip()]
+    ig_urls = [url for url in raw_urls if instagram_grid.is_instagram_post_url(url)]
+    if not ig_urls:
+        raise HTTPException(
+            status_code=400,
+            detail="No valid Instagram post or reel links found.",
+        )
+
+    cards = await instagram_grid.resolve_grid(ig_urls)
+    posts = [
+        {
+            "shortcode": card["shortcode"],
+            "url": card["url"],
+            "title": card["title"],
+            "caption": card["caption"],
+            "ok": card["ok"],
+            "error": card["error"],
+            "thumb": f"/ig/thumb/{card['shortcode']}" if card["ok"] else None,
+        }
+        for card in cards
+    ]
+    return {"posts": posts, "skipped": len(raw_urls) - len(ig_urls)}
+
+
+@app.get("/ig/thumb/{shortcode}")
+async def ig_thumb(request: Request, shortcode: str):
+    # Strict charset + cache-dir confinement: this is never an open proxy.
+    if not instagram_grid.SHORTCODE_RE.match(shortcode or ""):
+        raise HTTPException(status_code=404, detail="Unknown thumbnail.")
+    thumb_path = instagram_grid.thumbnail_cache_path(shortcode)
+    if not thumb_path.exists():
+        raise HTTPException(status_code=404, detail="Thumbnail not cached.")
+    return FileResponse(path=thumb_path, media_type="image/jpeg")
+
+
+@app.post("/ig/download")
+async def ig_download(request: Request, payload: IGDownloadRequest) -> dict[str, Any]:
+    raw_urls = [(url or "").strip() for url in payload.urls if (url or "").strip()]
+    ig_urls = [url for url in raw_urls if instagram_grid.is_instagram_post_url(url)]
+    if not ig_urls:
+        raise HTTPException(
+            status_code=400,
+            detail="No valid Instagram post or reel links found.",
+        )
+    ig_urls = ig_urls[:IG_BATCH_MAX_POSTS]
+
+    # SSRF validation up front, outside the service lock.
+    cleaned_urls: list[str] = []
+    failed: list[dict[str, str]] = []
+    for raw_url in ig_urls:
+        try:
+            cleaned_urls.append(validate_media_url(raw_url))
+        except HTTPException as exc:
+            failed.append({"url": raw_url, "error": str(exc.detail)})
+
+    service: PrivateTranscriptionService = request.app.state.service
+    batch_dir = _ig_batch_dir()
+    _sweep_stale_ig_batches(batch_dir)
+    token = uuid.uuid4().hex
+    work_dir = batch_dir / token
+    (work_dir / "videos").mkdir(parents=True, exist_ok=True)
+    # Throwaway downloader rooted at the batch dir so batch files never
+    # mingle with the library, and cleanup is one rmtree.
+    downloader = UniversalDownloader(output_dir=work_dir)
+
+    downloaded: list[dict[str, str]] = []
+    # Sequential by design, like every other batch path in this service.
+    async with service._lock:
+        for cleaned_url in cleaned_urls:
+            try:
+                media_path = await downloader.download_best_video(
+                    cleaned_url,
+                    use_browser_cookies=True,
+                )
+                downloaded.append({"url": cleaned_url, "filename": media_path.name})
+            except Exception as exc:  # noqa: BLE001 - report per-post, keep going
+                failed.append({"url": cleaned_url, "error": str(exc)})
+                LOGGER.warning("ig_download_failed url=%s err=%s", cleaned_url, exc)
+
+    if not downloaded:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        detail = "; ".join(item["error"] for item in failed[:3]) or "unknown error"
+        raise HTTPException(
+            status_code=502,
+            detail=f"None of the Instagram posts could be downloaded: {detail}",
+        )
+
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    zip_filename = f"instagram_posts_{stamp}_{token}.zip"
+    zip_path = batch_dir / zip_filename
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for item in downloaded:
+            source = work_dir / "videos" / item["filename"]
+            if source.exists():
+                archive.write(source, arcname=item["filename"])
+    shutil.rmtree(work_dir, ignore_errors=True)
+
+    LOGGER.info(
+        "ig_download_batch ok=%s failed=%s zip=%s",
+        len(downloaded),
+        len(failed),
+        zip_filename,
+    )
+    return {
+        "ok": True,
+        "downloaded": downloaded,
+        "failed": failed,
+        "zip": f"/ig/batch/{token}",
+    }
+
+
+@app.get("/ig/batch/{token}")
+async def ig_batch_zip(request: Request, token: str):
+    if not re.fullmatch(r"[0-9a-f]{32}", token or ""):
+        raise HTTPException(status_code=404, detail="Unknown batch.")
+    batch_dir = _ig_batch_dir()
+    matches = sorted(batch_dir.glob(f"*_{token}.zip"))
+    if not matches:
+        raise HTTPException(status_code=404, detail="Batch expired or already downloaded.")
+    zip_path = matches[0]
+    # Pretty download name: strip the _<token> suffix.
+    download_name = zip_path.stem[: -33] + ".zip"
+
+    def _cleanup() -> None:
+        try:
+            zip_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    return FileResponse(
+        path=zip_path,
+        media_type="application/zip",
+        filename=download_name,
+        background=BackgroundTask(_cleanup),
     )
 
 
