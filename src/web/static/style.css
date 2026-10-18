@@ -607,15 +607,20 @@ textarea { resize: none; line-height: 1.5; }
 
 .result-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
+.result-actions > .btn { flex: 1 1 auto; min-height: 44px; }
+#preview-links-btn { margin-top: 10px; min-height: 44px; }
+.media-link-previews { margin-top: 12px; }
+.media-link-preview { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border-mid); }
+.media-link-preview img { width: 72px; height: 96px; object-fit: cover; border-radius: var(--r-sm); flex-shrink: 0; }
+.media-link-preview > div { min-width: 0; }
+.media-link-preview p { margin: 0 0 6px; font-size: 14px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.media-link-preview a { color: var(--accent); font-size: 12px; overflow-wrap: anywhere; }
 
-.handoff-sep {
-  width: 1px;
-  align-self: stretch;
-  background: var(--border-strong);
-  margin: 6px 2px;
-}
+
+
 
 /* ─── Section label ──────────────────────────────────────────── */
 .section-label {

@@ -178,3 +178,7 @@ The private web service accepts the explicit `identify_speakers` form field (def
 Word-level temporal overlap assigns speaker labels. Ambiguous simultaneous voices and transition boundaries are marked Unclear; unmatched/zero-duration word timings remain Unattributed. Speaker labels are anonymous per recording and not persistent voice identities. Existing plain transcription and desktop UI behavior remain available.
 
 Instagram profile requests remain disabled by default (`SUBTEXT_INSTAGRAM_PROFILE_ENABLED=false`) independently of speaker labeling.
+
+### Transcript actions and link previews
+
+The private web Media page offers Copy, Download .txt (including iPhone preview/share), and Chat about this for local chat. External AI handoff buttons were removed. Result actions wrap on narrow screens. Paste individual Instagram post/reel links and choose Preview Instagram links to check thumbnails and captions before transcription. Preview failures do not block processing. Other media URLs remain supported for processing without this preview. The IG tab accepts individual links; blocked creator-profile browsing is hidden.

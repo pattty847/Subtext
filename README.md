@@ -336,3 +336,7 @@ Speaker labeling runs locally, requires media audio (so it bypasses the captions
 The `/transcribe`, `/api/transcribe`, and `/transcribe/stream` endpoints accept multipart `identify_speakers=true`; omitted or false keeps plain behavior. The CLI currently uses the plain default. If installation is missing, the service reports that before downloading media. Other runtime platforms can supply local `SUBTEXT_DIARIZATION_BIN` and `SUBTEXT_DIARIZATION_MODEL` paths; the bundled setup helper targets Apple Silicon only.
 
 Instagram creator-profile lookup remains paused by default. The diarization flow does not request Instagram profiles. Individual URL transcription only contacts the source URL the user submits.
+
+### Transcript actions and link previews
+
+The private web Media page offers Copy, Download .txt (including iPhone preview/share), and Chat about this for local chat. External AI handoff buttons were removed. Result actions wrap on narrow screens. Paste individual Instagram post/reel links and choose Preview Instagram links to check thumbnails and captions before transcription. Preview failures do not block processing. Other media URLs remain supported for processing without this preview. The IG tab accepts individual links; blocked creator-profile browsing is hidden.

@@ -60,9 +60,6 @@
   const copyBtn             = $('copy-btn');
   const downloadTxtBtn      = $('download-txt-btn');
   const chatCtxBtn          = $('chat-ctx-btn');
-  const sendChatgptBtn      = $('send-chatgpt-btn');
-  const sendClaudeBtn       = $('send-claude-btn');
-  const sendMuseBtn         = $('send-muse-btn');
 
   // Chat page
   const chatModelSelect     = $('chat-model-select');
@@ -467,6 +464,86 @@
     updateUrlCountHint();
   });
 
+  // Reuse the existing per-post preview service; never enumerate profiles.
+  const previewLinksBtn = $('preview-links-btn');
+  const mediaLinkPreviews = $('media-link-previews');
+  var previewRequest = null;
+
+  function instagramPreviewUrls() {
+    return parseUrlsFromText(urlInput.value).filter(function (value) {
+      try {
+        var url = new URL(value);
+        return /^(www\.)?instagram\.com$/i.test(url.hostname) &&
+          /^\/(p|reel|reels)\/[A-Za-z0-9_-]{5,64}\/?$/.test(url.pathname);
+      } catch (_) { return false; }
+    });
+  }
+
+  function resetLinkPreviews() {
+    if (previewRequest) previewRequest.abort();
+    previewRequest = null;
+    previewLinksBtn.disabled = false;
+    previewLinksBtn.textContent = 'Preview Instagram links';
+    previewLinksBtn.classList.toggle('hidden', !instagramPreviewUrls().length);
+    mediaLinkPreviews.replaceChildren();
+    mediaLinkPreviews.classList.add('hidden');
+  }
+
+  urlInput.addEventListener('input', resetLinkPreviews);
+  fileInput.addEventListener('change', resetLinkPreviews);
+  previewLinksBtn.addEventListener('click', async function () {
+    if (!state.apiKey) { toast('Enter the shared key first.'); return; }
+    var urls = instagramPreviewUrls();
+    if (!urls.length) return;
+    var controller = new AbortController();
+    previewRequest = controller;
+    previewLinksBtn.disabled = true;
+    mediaLinkPreviews.classList.remove('hidden');
+    mediaLinkPreviews.textContent = 'Loading previews…';
+    try {
+      var res = await fetch('/ig/grid', {
+        method: 'POST', signal: controller.signal,
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ urls: urls }),
+      });
+      var data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Preview unavailable.');
+      if (previewRequest !== controller) return;
+      mediaLinkPreviews.replaceChildren();
+      (data.posts || []).forEach(function (post) {
+        var row = document.createElement('div');
+        row.className = 'media-link-preview';
+        if (post.thumb && post.ok) {
+          var img = document.createElement('img');
+          img.src = post.thumb;
+          img.alt = '';
+          img.addEventListener('error', function () { img.remove(); });
+          row.appendChild(img);
+        }
+        var info = document.createElement('div');
+        var title = document.createElement('p');
+        title.textContent = post.ok ? (post.caption || post.title || 'Instagram post') :
+          'Preview unavailable. You can still try transcribing this link.';
+        var link = document.createElement('a');
+        link.href = post.url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = post.url;
+        info.append(title, link);
+        row.appendChild(info);
+        mediaLinkPreviews.appendChild(row);
+      });
+      if (!mediaLinkPreviews.children.length) mediaLinkPreviews.textContent = 'No previews available. You can still transcribe these links.';
+    } catch (err) {
+      if (err.name !== 'AbortError') mediaLinkPreviews.textContent = 'Preview unavailable. You can still transcribe these links.';
+    } finally {
+      if (previewRequest === controller) {
+        previewRequest = null;
+        previewLinksBtn.disabled = false;
+      }
+    }
+  });
+
   // Paste button: one tap if Clipboard API is available (HTTPS contexts);
   // otherwise focus the URL field so iOS shows Paste in the keyboard bar.
   urlPasteBtn.addEventListener('click', async function () {
@@ -754,51 +831,6 @@
       setTimeout(function () { copyBtn.textContent = original; }, 2000);
     });
   });
-
-  // ─── Media: AI handoff buttons ────────────────────────────────────────────
-  //
-  // ChatGPT accepts a prefilled prompt via its (undocumented, may-change)
-  // `?prompt=` parameter (`?q=` is older and flakier). Claude and Muse have
-  // no documented prefill URL, so the transcript is copied to the clipboard
-  // and the site opens for pasting. window.open() must stay in the click's
-  // synchronous call stack or popup blockers will eat it — so open first,
-  // then copy as the backup.
-
-  var AI_HANDOFF_MAX_URL = 6000;  // guard: fall back to copy+open above this
-
-  function handoffTranscript(target) {
-    var text = transcriptOutput.value;
-    if (!text) { toast('Nothing to send yet'); return; }
-
-    var dest, copyMsg;
-    if (target === 'chatgpt') {
-      var prefilled = 'https://chatgpt.com/?prompt=' + encodeURIComponent(text);
-      if (prefilled.length <= AI_HANDOFF_MAX_URL) {
-        dest = prefilled;
-        copyMsg = 'Opening ChatGPT with the transcript — it is also copied as a backup';
-      } else {
-        dest = 'https://chatgpt.com/';
-        copyMsg = 'Transcript too long for a link — copied, paste it into ChatGPT';
-      }
-    } else if (target === 'claude') {
-      dest = 'https://claude.ai/new';
-      copyMsg = 'Transcript copied — paste it into Claude';
-    } else {
-      dest = 'https://muse.ai/';
-      copyMsg = 'Transcript copied — paste it into Muse';
-    }
-
-    window.open(dest, '_blank', 'noopener');
-    copyToClipboard(text).then(function () {
-      toast(copyMsg);
-    }).catch(function () {
-      toast('Copy failed — long-press the text to copy manually');
-    });
-  }
-
-  sendChatgptBtn.addEventListener('click', function () { handoffTranscript('chatgpt'); });
-  sendClaudeBtn.addEventListener('click', function () { handoffTranscript('claude'); });
-  sendMuseBtn.addEventListener('click', function () { handoffTranscript('muse'); });
 
   // ─── Media: download transcript as .txt ───────────────────────────────────
 
@@ -1951,9 +1983,9 @@
     if (evt) evt.preventDefault();
     if (igBusy) return;
     if (!state.apiKey) { igShowStatus('Enter the shared key first.'); return; }
-    var creator = append ? igCreator : igProfileInput.value.trim();
+    var creator = ''; // Profile lookup is paused; use individual links.
     var urls = parseUrlsFromText(igUrlInput.value);
-    if (!creator && !urls.length) { igShowStatus('Enter a creator profile or paste post links.'); return; }
+    if (!creator && !urls.length) { igShowStatus('Paste Instagram post or reel links.'); return; }
     if (!append) {
       igPosts = [];
       igCursor = '';
@@ -1991,7 +2023,7 @@
       igRenderGrid();
       igShowStatus(igPosts.length + ' posts loaded. Select videos; photos are view-only.' +
         (data.skipped ? ' ' + data.skipped + ' unsupported links skipped.' : ''));
-      igEmpty.textContent = 'No posts returned for this creator.';
+      igEmpty.textContent = 'No previews returned for these links.';
     } catch (err) {
       igShowStatus(err.message || 'Could not load posts.');
     } finally {
@@ -2081,6 +2113,7 @@
   igTranscribeBtn.addEventListener('click', function () {
     if (igBusy || state.transcribeBusy || !igSelected().length) return;
     urlInput.value = igSelected().map(function (post) { return post.url; }).join('\n');
+    resetLinkPreviews();
     fileInput.value = '';
     filePickText.textContent = 'Choose audio or video…';
     filePickLabel.classList.remove('has-file');

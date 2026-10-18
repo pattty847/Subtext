@@ -97,3 +97,7 @@ It also includes a command-line client for programmatic transcribe/download acce
 ## Speaker-labeling behavior
 
 The private Media page offers an off-by-default Identify speakers checkbox. Automatic speaker counts require no prior knowledge of the recording. It applies to uploaded media and URL batches, labeling each source independently. Ambiguous overlap is explicitly marked; names are not inferred. NVIDIA supports up to eight speaker channels. Renaming speakers and recognizing voices across recordings are not implemented. This web feature does not add a desktop speaker-labeling workflow. Initial setup is supported on Apple Silicon; all inference remains on the local machine.
+
+### Transcript actions and link previews
+
+The private web Media page offers Copy, Download .txt (including iPhone preview/share), and Chat about this for local chat. External AI handoff buttons were removed. Result actions wrap on narrow screens. Paste individual Instagram post/reel links and choose Preview Instagram links to check thumbnails and captions before transcription. Preview failures do not block processing. Other media URLs remain supported for processing without this preview. The IG tab accepts individual links; blocked creator-profile browsing is hidden.
