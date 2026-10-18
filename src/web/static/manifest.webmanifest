@@ -6,8 +6,8 @@
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#07090d",
-  "theme_color": "#07090d",
+  "background_color": "#141916",
+  "theme_color": "#141916",
   "share_target": {
     "action": "/",
     "method": "GET",

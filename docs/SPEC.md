@@ -101,3 +101,7 @@ The private Media page offers an off-by-default Identify speakers checkbox. Auto
 ### Transcript actions and link previews
 
 The private web Media page offers Copy, Download .txt (including iPhone preview/share), and Chat about this for local chat. External AI handoff buttons were removed. Result actions wrap on narrow screens. Paste individual Instagram post/reel links and choose Preview Instagram links to check thumbnails and captions before transcription. Preview failures do not block processing. Other media URLs remain supported for processing without this preview. The IG tab accepts individual links; blocked creator-profile browsing is hidden.
+
+### Paper interface and appearance
+
+The private web interface uses the Paper layout, with a dark forest theme by default. The appearance button in the header switches between dark and light and remembers the choice in this browser. Source entry, Instagram link previews, optional speaker labeling, downloads, and local chat retain their existing behavior. The main interface continues to use the localhost service on port 8000 through private Tailscale Serve.

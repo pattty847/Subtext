@@ -1,28 +1,30 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Subtext">
-  <meta name="theme-color" content="#07090d">
+  <meta name="theme-color" content="#141916">
   <title>Subtext</title>
   <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/icon-180.png">
   <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="/static/icons/icon-512.png">
-  <link rel="stylesheet" href="/static/style.css?v=20261018previews">
+  <script src="/static/theme.js?v=20261018dark"></script>
+  <link rel="stylesheet" href="/static/style.css?v=20261018paper">
+  <link rel="stylesheet" href="/static/paper.css?v=20261018dark">
 </head>
 <body>
 
   <!-- ── Top bar ─────────────────────────────────────────────────── -->
   <header class="top-bar">
     <div class="top-bar-brand">
-      <span class="top-bar-logo">Subtext</span>
+      <span class="top-bar-logo">subtext<span class="brand-period">.</span></span>
       <span class="service-dot" id="service-dot" title="Checking service…"></span>
     </div>
-    <div class="top-bar-right">
+    <div class="top-bar-right"><button class="icon-btn theme-toggle" id="theme-toggle-btn" aria-label="Switch to light theme" title="Switch to light theme"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg></button>
       <button class="icon-btn" id="key-toggle-btn" aria-label="API key" title="API key">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="7.5" cy="15.5" r="5.5"/><path d="M21 2L13 10M15 4l2 2M11 12l2 2"/>
@@ -49,6 +51,7 @@
     <!-- ── Page: Media ──────────────────────────────────────────── -->
     <section class="page active" id="page-media" role="main" aria-label="Media">
 
+      <div class="paper-heading"><p class="paper-eyebrow">YOUR PRIVATE TRANSCRIPTION DESK</p><h1>Start with a link.<br><em>Keep the words.</em></h1></div>
       <!-- Service status -->
       <div class="notice hidden" id="service-notice">
         <span id="service-notice-text">Checking service…</span>
@@ -59,10 +62,10 @@
 
           <form id="transcribe-form" class="media-form" novalidate>
             <div class="field">
-              <label class="field-label" for="url-input">URL</label>
+              <label class="field-label" for="url-input">01 / Add your source</label>
               <div class="url-row">
                 <textarea id="url-input"
-                          placeholder="Paste one or more video links…"
+                          placeholder="Paste a video link here…"
                           autocomplete="off" autocapitalize="off" spellcheck="false"
                           rows="2"></textarea>
                 <button id="url-paste-btn" class="url-paste-btn" type="button" aria-label="Paste URL" title="Paste URL">
@@ -77,29 +80,29 @@
               <div id="url-count-hint" class="url-count-hint hidden">1 link detected</div>
             </div>
 
-            <div class="or-divider"><span>or</span></div>
+            <div class="or-divider"><span>or bring your own</span></div>
 
             <div class="field">
-              <label class="field-label" for="file-input">Local file</label>
+              <label class="field-label sr-only" for="file-input">Local file</label>
               <label class="file-pick" id="file-pick-label">
                 <input id="file-input" type="file"
                        accept="audio/*,video/*,.wav,.m4a,.mp3,.aac,.flac,.ogg,.opus,.webm,.mp4,.mov,.m4v,.avi,.mkv">
                 <svg class="file-pick-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
                 </svg>
-                <span id="file-pick-text">Choose audio or video…</span>
+                <span id="file-pick-text">Choose an audio or video file</span>
               </label>
             </div>
 
             <label class="speaker-option" for="identify-speakers">
               <input type="checkbox" id="identify-speakers" aria-describedby="speaker-option-help">
-              <span>Identify speakers <small id="speaker-option-help">NVIDIA · automatic Person 1, Person 2 labels. Uses audio; takes longer.</small></span>
+              <span>Identify speakers <small id="speaker-option-help">Label each voice. Local processing, a little more time.</small></span>
             </label>
 
             <div class="action-row action-row--stack-mobile">
-              <button id="submit-btn" class="btn btn-primary" type="submit">Transcribe</button>
-              <button id="download-audio-btn" class="btn btn-accent" type="button">Download Audio</button>
-              <button id="download-btn" class="btn btn-secondary" type="button">Download Video</button>
+              <button id="submit-btn" class="btn btn-primary" type="submit">Create transcript ↗</button>
+              <button id="download-audio-btn" class="btn btn-accent" type="button">Audio only</button>
+              <button id="download-btn" class="btn btn-secondary" type="button">Save video</button>
             </div>
           </form>
 
@@ -113,8 +116,10 @@
 
         <div class="media-col media-col--output">
 
+          <div class="paper-empty"><span class="paper-empty-mark">“</span><p>A little room<br>for what was said.</p><span>Your transcript will appear here.</span></div>
           <!-- Result -->
           <div class="result-area hidden" id="result-card">
+            <h2 class="paper-result-title">Your transcript<span>02 / WORDS</span></h2>
             <div class="pill-row">
               <span class="pill" id="duration-pill">—</span>
               <span class="pill" id="latency-pill">—</span>
@@ -439,6 +444,6 @@
     </button>
   </nav>
 
-  <script src="/static/app.js?v=20261018previews"></script>
+  <script src="/static/app.js?v=20261018paper"></script>
 </body>
 </html>
