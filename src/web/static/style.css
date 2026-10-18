@@ -1692,3 +1692,25 @@ textarea { resize: none; line-height: 1.5; }
 @media (min-width: 720px) {
   .ig-grid { grid-template-columns: repeat(4, 1fr); }
 }
+
+/* Profile browsing keeps the same three-column media rhythm as Instagram. */
+#ig-profile-input { width: 100%; padding: 12px; background: var(--surface-2); color: var(--text-1); border: 1px solid var(--border-strong); border-radius: var(--r-sm); font: inherit; }
+.ig-help, .ig-links-details { color: var(--text-2); font-size: 13px; line-height: 1.5; }
+.ig-links-details summary { cursor: pointer; padding: 8px 0; }
+.ig-links-details textarea { margin-top: 8px; }
+.ig-profile-heading { font-weight: 600; margin-bottom: 16px; overflow-wrap: anywhere; }
+.ig-toolbar, .ig-toolbar-actions { flex-wrap: wrap; }
+.ig-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.ig-tile { min-width: 0; }
+.ig-card { width: 100%; }
+.ig-thumb { aspect-ratio: 3 / 4; }
+.ig-card:disabled { cursor: default; }
+.ig-card:disabled .ig-check { display: none; }
+.ig-preview { display: block; padding: 8px 0; font-size: 11px; color: var(--text-2); text-underline-offset: 3px; }
+.ig-card:focus-visible, .ig-preview:focus-visible, #ig-profile-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+#ig-more-btn { width: 100%; margin-top: 16px; }
+@media (prefers-reduced-motion: reduce) { .ig-thumb, .ig-check { transition: none; } }
+
+.speaker-option { display: flex; align-items: flex-start; gap: 10px; margin: 16px 0; color: var(--text-1); cursor: pointer; font-size: 14px; }
+.speaker-option input { width: 20px; height: 20px; flex-shrink: 0; accent-color: var(--accent); }
+.speaker-option small { display: block; margin-top: 4px; color: var(--text-2); font-size: 12px; line-height: 1.5; }

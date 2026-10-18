@@ -314,3 +314,25 @@ uv run python run.py
 ## License
 
 MIT
+
+## Speaker diarization evaluation
+
+An isolated local comparison of NVIDIA Nemotron 3 Diarization and pyannote Community-1 is documented in [benchmarks/diarization/README.md](benchmarks/diarization/README.md). The private web service now offers optional NVIDIA speaker labels; the desktop UI is unchanged.
+
+## Optional speaker labels (private web service)
+
+On the Media page, leave **Identify speakers** off for normal captions-first transcription. Turn it on to process the audio with NVIDIA Nemotron 3 Diarization and Whisper word timestamps. Output uses timestamped **Person 1**, **Person 2**, etc. Labels are consistent within each recording, not identities shared across files. Overlapping voices and uncertain boundaries are marked **Unclear**; words without matching activity are **Unattributed**. This is automatic labeling and can make mistakes; it does not separate overlapping voices into independent audio tracks.
+
+One-time setup on an Apple Silicon Mac:
+
+```bash
+uv run python scripts/setup_diarization.py
+```
+
+Setup installs the pinned NVIDIA macOS runtime and Q8_0 model (about 102 MiB) under the ignored `assets/runtime/diarization/` directory, verifies download hashes, and preserves runtime licenses. Existing benchmark model files are reused when their hash matches. See [NVIDIA's model card and OpenMDW license](https://huggingface.co/nvidia/Nemotron-3-Diarization). No Hugging Face login or pyannote installation is needed for this mode.
+
+Speaker labeling runs locally, requires media audio (so it bypasses the captions-only fast path), and adds processing time. NVIDIA exits before Whisper starts; a previously warm Whisper model is unloaded first to limit concurrent model memory. Whisper word alignment runs on the backend's existing worker thread. Downloads and transcription batches stay sequential. Enabling the option applies to URL input, URL batches, and local uploads in the web interface. Copy, transcript download, and chat handoffs include the labels.
+
+The `/transcribe`, `/api/transcribe`, and `/transcribe/stream` endpoints accept multipart `identify_speakers=true`; omitted or false keeps plain behavior. The CLI currently uses the plain default. If installation is missing, the service reports that before downloading media. Other runtime platforms can supply local `SUBTEXT_DIARIZATION_BIN` and `SUBTEXT_DIARIZATION_MODEL` paths; the bundled setup helper targets Apple Silicon only.
+
+Instagram creator-profile lookup remains paused by default. The diarization flow does not request Instagram profiles. Individual URL transcription only contacts the source URL the user submits.

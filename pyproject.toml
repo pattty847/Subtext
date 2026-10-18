@@ -19,6 +19,7 @@ dependencies = [
     "uvicorn[standard]",
     "python-multipart",
     "mlx-whisper>=0.4.3",
+    "instaloader>=4.15.4",
 ]
 
 [project.optional-dependencies]

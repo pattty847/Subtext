@@ -1,0 +1,57 @@
+[
+  {
+    "id": "ami_en2002d_2132",
+    "dataset": "AMI",
+    "source": "https://raw.githubusercontent.com/NVIDIA/NeMo-Speech.cpp/083861c241061562b8ec29eb06d7f6cdc3af8775/test_files/diar",
+    "role": "smoke-test; NVIDIA-distributed fixture, not independent",
+    "duration_seconds": 60.0,
+    "audio": "data/ami_en2002d_2132.wav",
+    "reference": "data/ami_en2002d_2132.rttm",
+    "sha256": {
+      "wav": "f00f92e53115a4a6724aec0ddaf9c675df6d5fabd3a489b43fffe56ba52a3ae9",
+      "rttm": "40751c9fc0bb934f741789ce3fafccd2c1f9d7c112585b8b40ac177a9de13b2d"
+    }
+  },
+  {
+    "id": "eazeq",
+    "dataset": "VoxConverse v0.3 test",
+    "source": "https://www.robots.ox.ac.uk/~vgg/data/voxconverse/data/voxconverse_test_wav.zip",
+    "reference_speakers": 2,
+    "role": "public benchmark; possible model development exposure",
+    "duration_seconds": 98.624,
+    "audio": "data/eazeq.wav",
+    "reference": "data/eazeq.rttm",
+    "sha256": {
+      "wav": "376a3dfb2d08d613224b1966dea131fc0aa65484fc662b5f4a30c0da64d6b385",
+      "rttm": "fbab9f827035ca2cd5938a1a4ea6a01241c6c8fa3d421f7d44b24b4f619bc944"
+    }
+  },
+  {
+    "id": "bvyvm",
+    "dataset": "VoxConverse v0.3 test",
+    "source": "https://www.robots.ox.ac.uk/~vgg/data/voxconverse/data/voxconverse_test_wav.zip",
+    "reference_speakers": 3,
+    "role": "public benchmark; possible model development exposure",
+    "duration_seconds": 117.248,
+    "audio": "data/bvyvm.wav",
+    "reference": "data/bvyvm.rttm",
+    "sha256": {
+      "wav": "b77a9461c5f8ee0ad2a7c162e4426e5fd47f0edf5acc5762a8c515b1c370a99e",
+      "rttm": "9c2419db431a6b1b0450b9821f560f6c2d2cd82a86456a4388226dd76c0878f4"
+    }
+  },
+  {
+    "id": "aepyx",
+    "dataset": "VoxConverse v0.3 test",
+    "source": "https://www.robots.ox.ac.uk/~vgg/data/voxconverse/data/voxconverse_test_wav.zip",
+    "reference_speakers": 4,
+    "role": "public benchmark; possible model development exposure",
+    "duration_seconds": 169.152,
+    "audio": "data/aepyx.wav",
+    "reference": "data/aepyx.rttm",
+    "sha256": {
+      "wav": "d6aed597425ea4ce852db919912906e45471acd74e18ed3046360cbc3f06c27b",
+      "rttm": "fd5bf3e0ecfacaba66d749e75f39574162b8cb472e7910ecadf0fc949d00e9c9"
+    }
+  }
+]

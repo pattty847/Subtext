@@ -40,7 +40,7 @@ from src.core.analyzer import (
     OllamaAnalyzer,
 )
 from src.core.downloader import UniversalDownloader
-from src.core import instagram_grid
+from src.core import instagram_grid, instagram_profiles, diarization
 from src.core.input_processor import InputProcessor
 from src.core.transcriber import WhisperTranscriber
 from src.web.chat_store import ChatStore, transcript_hash as _transcript_hash
@@ -346,6 +346,11 @@ class IGGridRequest(BaseModel):
     urls: List[str] = Field(default_factory=list)
 
 
+class IGProfileRequest(BaseModel):
+    creator: str = Field(min_length=1, max_length=256)
+    cursor: str = Field(default='', max_length=64)
+
+
 class IGDownloadRequest(BaseModel):
     urls: List[str] = Field(default_factory=list)
 
@@ -423,7 +428,7 @@ class PrivateTranscriptionService:
     def _touch_transcribe(self) -> None:
         self._last_transcribe_activity = time.time()
 
-    async def transcribe_upload(self, file: UploadFile) -> dict[str, float | str]:
+    async def transcribe_upload(self, file: UploadFile, identify_speakers: bool = False) -> dict[str, float | str]:
         suffix = Path(file.filename or "upload.wav").suffix.lower()
         if suffix not in ALLOWED_EXTENSIONS:
             raise HTTPException(
@@ -452,7 +457,8 @@ class PrivateTranscriptionService:
             async with self._lock:
                 self._touch_transcribe()
                 duration = self.transcriber.get_audio_duration(temp_path)
-                text = await self.transcriber.transcribe(temp_path)
+                text = (await diarization.transcribe_labeled(temp_path, self.transcriber)
+                        if identify_speakers else await self.transcriber.transcribe(temp_path))
 
             latency = time.perf_counter() - started_at
             return {
@@ -468,7 +474,7 @@ class PrivateTranscriptionService:
             except Exception:
                 LOGGER.warning("cleanup_failed path=%s", temp_path)
 
-    async def transcribe_url(self, url: str) -> dict[str, float | str]:
+    async def transcribe_url(self, url: str, identify_speakers: bool = False) -> dict[str, float | str]:
         cleaned_url = validate_media_url(url)
 
         started_at = time.perf_counter()
@@ -481,7 +487,8 @@ class PrivateTranscriptionService:
                     use_browser_cookies=_web_media_browser_cookies_enabled(self),
                 )
                 duration = self.transcriber.get_audio_duration(downloaded_path)
-                text = await self.transcriber.transcribe(downloaded_path)
+                text = (await diarization.transcribe_labeled(downloaded_path, self.transcriber)
+                        if identify_speakers else await self.transcriber.transcribe(downloaded_path))
 
             latency = time.perf_counter() - started_at
             return {
@@ -1027,11 +1034,23 @@ async def download_audio(
 
 # ── Instagram grid ──────────────────────────────────────────────────────
 #
-# Paste IG post/reel links -> thumbnail grid -> tap to select -> batch
-# download as a zip. Post *lists* cannot be fetched on the box (profile pages
-# are login-walled and yt-dlp's instagram:user extractor is marked broken),
-# so the client supplies the URLs; an agent with Instagram access (or the
-# Instagram app's share sheet) is the usual source.
+# Creator profiles use Instaloader with an optional local Instagram session.
+# Individual post/reel URLs remain available as a fallback.
+_ig_profiles = instagram_profiles.ProfileBrowser()
+
+
+@app.post("/ig/profile")
+async def ig_profile(payload: IGProfileRequest) -> dict[str, Any]:
+    if not _env_flag("SUBTEXT_INSTAGRAM_PROFILE_ENABLED", False):
+        raise HTTPException(status_code=503, detail="Creator profile lookup is paused. No Instagram profile requests are being sent.")
+    try:
+        return await _ig_profiles.page(payload.creator, payload.cursor)
+    except instagram_profiles.ProfileLookupError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.post("/ig/grid")
 async def ig_grid(request: Request, payload: IGGridRequest) -> dict[str, Any]:
     raw_urls = [(url or "").strip() for url in payload.urls if (url or "").strip()]
@@ -1078,7 +1097,9 @@ async def ig_download(request: Request, payload: IGDownloadRequest) -> dict[str,
             status_code=400,
             detail="No valid Instagram post or reel links found.",
         )
-    ig_urls = ig_urls[:IG_BATCH_MAX_POSTS]
+    ig_urls = list(dict.fromkeys(ig_urls))
+    if len(ig_urls) > IG_BATCH_MAX_POSTS:
+        raise HTTPException(status_code=400, detail='Select up to 10 videos per download batch.')
 
     # SSRF validation up front, outside the service lock.
     cleaned_urls: list[str] = []
@@ -1176,8 +1197,15 @@ async def transcribe(
     request: Request,
     url: str = Form(default=""),
     file: Optional[UploadFile] = File(default=None),
+    identify_speakers: bool = Form(default=False),
 ) -> dict[str, float | str]:
     service: PrivateTranscriptionService = request.app.state.service
+    if identify_speakers:
+        try:
+            diarization.ensure_available()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
 
     has_url = bool(url.strip())
     has_file = file is not None and bool(file.filename)
@@ -1189,7 +1217,7 @@ async def transcribe(
 
     if has_url:
         cleaned_url = validate_media_url(url)
-        result = await service.transcribe_url(cleaned_url)
+        result = await service.transcribe_url(cleaned_url, True) if identify_speakers else await service.transcribe_url(cleaned_url)
         LOGGER.info(
             "transcribed_url duration=%.3f latency=%.3f chars=%s",
             result["duration"],
@@ -1199,7 +1227,7 @@ async def transcribe(
         return result
 
     assert file is not None
-    result = await service.transcribe_upload(file)
+    result = await service.transcribe_upload(file, True) if identify_speakers else await service.transcribe_upload(file)
     LOGGER.info(
         "transcribed_file filename=%s duration=%.3f latency=%.3f chars=%s",
         file.filename,
@@ -1211,18 +1239,24 @@ async def transcribe(
 
 
 @app.post("/api/transcribe")
-async def api_transcribe(request: Request, file: UploadFile = File(...)) -> dict[str, float | str]:
+async def api_transcribe(request: Request, file: UploadFile = File(...), identify_speakers: bool = Form(default=False)) -> dict[str, float | str]:
     # Called as a plain function, so FastAPI will not fill url's Form default.
-    return await transcribe(request, url="", file=file)
+    return await transcribe(request, url="", file=file, identify_speakers=identify_speakers)
 
 
 @app.post("/transcribe/stream")
-async def transcribe_stream(request: Request, url: str = Form(default=""), file: Optional[UploadFile] = File(default=None)):
+async def transcribe_stream(request: Request, url: str = Form(default=""), file: Optional[UploadFile] = File(default=None), identify_speakers: bool = Form(default=False)):
     """
     Stream transcription chunks as Server-Sent Events.
     Yields 'chunk' events with text fragments as they are transcribed.
     """
     service: PrivateTranscriptionService = request.app.state.service
+    if identify_speakers:
+        try:
+            diarization.ensure_available()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
 
     validated_urls: list[str] = []
     if url.strip():
@@ -1264,7 +1298,7 @@ async def transcribe_stream(request: Request, url: str = Form(default=""), file:
             return events
 
         async def try_available_captions(source_url: str) -> tuple[str, Path, str] | None:
-            if not _web_youtube_captions_enabled(service):
+            if identify_speakers or not _web_youtube_captions_enabled(service):
                 return None
             if service.downloader.is_youtube_url(source_url):
                 caption_text, caption_path = await service.downloader.download_youtube_captions(
@@ -1277,6 +1311,33 @@ async def transcribe_stream(request: Request, url: str = Form(default=""), file:
                 use_browser_cookies=_web_media_browser_cookies_enabled(service),
             )
             return caption_text, caption_path, "url_captions"
+
+        async def speaker_events(path: Path) -> AsyncGenerator[tuple[str, dict[str, Any]], None]:
+            current_message = "Preparing speaker labeling…"
+            def status(message: str) -> None:
+                nonlocal current_message
+                current_message = message
+                loop.call_soon_threadsafe(progress_queue.put_nowait, {
+                    "stage": "speakers", "percent": 0, "message": message,
+                })
+
+            task = asyncio.create_task(diarization.transcribe_labeled(path, service.transcriber, status))
+            try:
+                last_update = time.monotonic()
+                while not task.done():
+                    await asyncio.wait({task}, timeout=0.5)
+                    for event in await flush_progress_events():
+                        last_update = time.monotonic()
+                        yield "progress", event
+                    if not task.done() and time.monotonic() - last_update >= 10:
+                        yield "progress", {"stage": "speakers", "percent": 0, "message": current_message}
+                        last_update = time.monotonic()
+                text = await task
+                yield "chunk", {"text": text}
+            finally:
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
         try:
             if has_url:
@@ -1335,14 +1396,17 @@ async def transcribe_stream(request: Request, url: str = Form(default=""), file:
                                     _long_fallback_error(caption_error, duration, fallback_limit)
                                 )
 
-                            async for text_chunk in service.transcriber.transcribe_stream(
-                                downloaded_path,
-                                progress_callback=progress_callback,
-                            ):
-                                for progress_event in await flush_progress_events():
-                                    yield _sse_event("progress", progress_event)
-                                if text_chunk:
-                                    yield _sse_event("chunk", {"text": text_chunk})
+                            if identify_speakers:
+                                async for kind, payload in speaker_events(downloaded_path):
+                                    yield _sse_event(kind, payload)
+                            else:
+                                async for text_chunk in service.transcriber.transcribe_stream(
+                                    downloaded_path, progress_callback=progress_callback,
+                                ):
+                                    for progress_event in await flush_progress_events():
+                                        yield _sse_event("progress", progress_event)
+                                    if text_chunk:
+                                        yield _sse_event("chunk", {"text": text_chunk})
 
                         for progress_event in await flush_progress_events():
                             yield _sse_event("progress", progress_event)
@@ -1403,7 +1467,16 @@ async def transcribe_stream(request: Request, url: str = Form(default=""), file:
                                         _long_fallback_error(caption_error, duration, fallback_limit)
                                     )
                                 total_duration += duration
-                                transcript_text = await service.transcriber.transcribe(downloaded_path)
+                                if identify_speakers:
+                                    pieces = []
+                                    async for kind, payload in speaker_events(downloaded_path):
+                                        if kind == "chunk":
+                                            pieces.append(payload["text"])
+                                        else:
+                                            yield _sse_event(kind, payload)
+                                    transcript_text = "".join(pieces)
+                                else:
+                                    transcript_text = await service.transcriber.transcribe(downloaded_path)
 
                             section_text = _batch_success_section(
                                 index,
@@ -1462,14 +1535,17 @@ async def transcribe_stream(request: Request, url: str = Form(default=""), file:
                     async with service._lock:
                         duration = service.transcriber.get_audio_duration(temp_path)
 
-                        async for text_chunk in service.transcriber.transcribe_stream(
-                            temp_path,
-                            progress_callback=progress_callback,
-                        ):
-                            for progress_event in await flush_progress_events():
-                                yield _sse_event("progress", progress_event)
-                            if text_chunk:
-                                yield _sse_event("chunk", {"text": text_chunk})
+                        if identify_speakers:
+                            async for kind, payload in speaker_events(temp_path):
+                                yield _sse_event(kind, payload)
+                        else:
+                            async for text_chunk in service.transcriber.transcribe_stream(
+                                temp_path, progress_callback=progress_callback,
+                            ):
+                                for progress_event in await flush_progress_events():
+                                    yield _sse_event("progress", progress_event)
+                                if text_chunk:
+                                    yield _sse_event("chunk", {"text": text_chunk})
 
                     for progress_event in await flush_progress_events():
                         yield _sse_event("progress", progress_event)

@@ -441,6 +441,43 @@ class WhisperTranscriber:
             await asyncio.gather(transcription_future, return_exceptions=True)
             raise Exception(f"Transcription failed: {str(e)}")
 
+    async def transcribe_words(self, audio_path: Path) -> list[dict]:
+        """Transcribe once with word timestamps, on the backend's own thread."""
+        self._ensure_ffmpeg_available()
+        await self.load_model()
+
+        def run() -> list[dict]:
+            if self.backend == "faster-whisper":
+                segments, _info = self.model.transcribe(
+                    str(audio_path), beam_size=5, vad_filter=False,
+                    condition_on_previous_text=True, word_timestamps=True,
+                )
+                return [
+                    {"start": word.start, "end": word.end, "text": word.word}
+                    for segment in segments for word in (segment.words or [])
+                ]
+            if self.backend == "mlx":
+                result = mlx_whisper.transcribe(
+                    str(audio_path), path_or_hf_repo=resolve_mlx_repo(self.model_name),
+                    condition_on_previous_text=True, verbose=None, word_timestamps=True,
+                )
+            else:
+                result = self.model.transcribe(
+                    str(audio_path), fp16=self.use_fp16, verbose=False, word_timestamps=True,
+                )
+            return [
+                {"start": word["start"], "end": word["end"], "text": word["word"]}
+                for segment in result.get("segments", []) for word in segment.get("words", [])
+            ]
+
+        future = asyncio.get_running_loop().run_in_executor(self._executor(), run)
+        try:
+            return await asyncio.shield(future)
+        except asyncio.CancelledError:
+            # The worker still owns the audio/model; wait before its caller cleans up.
+            await future
+            raise
+
     async def transcribe_and_save(
         self,
         audio_path: Path,

@@ -1,0 +1,74 @@
+[
+  {
+    "id": "tiktok_solo_speech",
+    "url": "https://www.tiktok.com/t/ZTyoeRBc5/",
+    "user_description": "One woman speaking on camera; user describes intoxicated delivery",
+    "expected_speakers_note": "1, unverified",
+    "reference_status": "needs listening and timestamp annotation",
+    "audio": "data/social/tiktok_solo_speech.wav",
+    "duration_seconds": 96.8054375,
+    "sha256": {
+      "wav": "03703b2582ba79a87eb1940792af23d34fc3aa00781d7f26c9b3bbe4356bbe69"
+    }
+  },
+  {
+    "id": "tiktok_singing",
+    "url": "https://www.tiktok.com/t/ZTyoJoPAo/",
+    "user_description": "One female singer singing",
+    "expected_speakers_note": "1; check backing vocals/layering",
+    "reference_status": "needs listening and timestamp annotation",
+    "audio": "data/social/tiktok_singing.wav",
+    "duration_seconds": 68.7556875,
+    "sha256": {
+      "wav": "417efc41a2dce67abc10c430405553a1926f4a431dbbd97724255ead994e52d1"
+    }
+  },
+  {
+    "id": "instagram_game_chat",
+    "url": "https://www.instagram.com/reel/DYQStIiBQIo/",
+    "user_description": "Game chat with gunshots",
+    "expected_speakers_note": "4, user-confirmed; fourth overlaps with other speakers",
+    "reference_status": "needs listening and timestamp annotation",
+    "audio": "data/social/instagram_game_chat.wav",
+    "duration_seconds": 136.4650625,
+    "sha256": {
+      "wav": "cfb1a4dc71629534806fb712ab0eda4995f0aee682de4b3788822b2ecad4adaf"
+    }
+  },
+  {
+    "id": "instagram_street_interview",
+    "url": "https://www.instagram.com/reel/DehxSE9vjpD/",
+    "user_description": "Clear street interview, alternating speakers",
+    "expected_speakers_note": "2, unverified",
+    "reference_status": "needs listening and timestamp annotation",
+    "audio": "data/social/instagram_street_interview.wav",
+    "duration_seconds": 63.69375,
+    "sha256": {
+      "wav": "37d0e2e756c991823fba2941864a31c27205c9d57a9e01da4f15fca8f2d49eed"
+    }
+  },
+  {
+    "id": "instagram_debate",
+    "url": "https://www.instagram.com/reel/DeZk4_dvGV9/",
+    "user_description": "Two women debating, strong Indian accents, clapping and audience vocalizations",
+    "expected_speakers_note": "2 principal speakers; audience may add voices",
+    "reference_status": "needs listening and timestamp annotation",
+    "audio": "data/social/instagram_debate.wav",
+    "duration_seconds": 44.2354375,
+    "sha256": {
+      "wav": "0bfff9139352510b6cd784f4ad7233b038fd294f266828bd5d6509dc7a1f8080"
+    }
+  },
+  {
+    "id": "instagram_judge",
+    "url": "https://www.instagram.com/reel/Dd63P3kxTSf/",
+    "user_description": "Judge Adam Levy presiding, clear audio",
+    "expected_speakers_note": "up to 3, unverified",
+    "reference_status": "needs listening and timestamp annotation",
+    "audio": "data/social/instagram_judge.wav",
+    "duration_seconds": 59.7928125,
+    "sha256": {
+      "wav": "107fb6525fc8f4f734f037f183824572be3b19d93a13143a8ffc78dc2340a510"
+    }
+  }
+]

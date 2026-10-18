@@ -84,7 +84,10 @@ class LMStudioProvider:
                 except Exception as exc:  # noqa: BLE001
                     LOGGER.warning("lmstudio_unload_failed model=%s err=%s", identifier, exc)
 
-        await self._run(_unload)
+        try:
+            await self._run(_unload)
+        except lms.LMStudioError as exc:
+            LOGGER.warning("lmstudio_unload_unavailable err=%s", exc)
 
     async def stream_chat(
         self,

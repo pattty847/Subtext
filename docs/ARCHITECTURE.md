@@ -164,3 +164,17 @@ assets/
 - Batch mixed input flow
 - Ollama model refresh/install/test in Analysis tab
 - Export each format from Results tab
+
+## Experimental diarization benchmark
+
+`benchmarks/diarization/` holds a standalone sequential evaluation harness, public reference audio preparation, and optional user-selected sample retrieval. Its environment, models, and results are separate from the application. The web service integrates NVIDIA speaker labeling separately; the desktop UI is unchanged. See the benchmark README for scoring, provenance, and hardware limitations.
+
+## Optional NVIDIA speaker labeling
+
+`src/core/diarization.py` owns local ffmpeg conversion, NeMo-Speech.cpp process lifecycle, RTTM parsing, and word-to-speaker attribution. Runtime/model paths resolve beneath `ProjectPaths.RUNTIME_DIR`, with explicit environment overrides. `scripts/setup_diarization.py` installs pinned artifacts with SHA-256 checks. The inference process uses an existing local model file and does not download one during a request.
+
+The private web service accepts the explicit `identify_speakers` form field (default false). Enabled requests bypass captions, acquire the same service processing lock, release warm Whisper resources, run NVIDIA, then call `WhisperTranscriber.transcribe_words`. This method preserves MLX thread affinity and waits for worker completion on cancellation before temporary audio is removed. Native child processes are killed and reaped on cancellation/timeout. Native and Whisper models run sequentially. Streaming clients receive progress while waiting; batch sections retain per-source boundaries and speaker IDs reset per recording.
+
+Word-level temporal overlap assigns speaker labels. Ambiguous simultaneous voices and transition boundaries are marked Unclear; unmatched/zero-duration word timings remain Unattributed. Speaker labels are anonymous per recording and not persistent voice identities. Existing plain transcription and desktop UI behavior remain available.
+
+Instagram profile requests remain disabled by default (`SUBTEXT_INSTAGRAM_PROFILE_ENABLED=false`) independently of speaker labeling.

@@ -1,0 +1,44 @@
+[
+  {
+    "id": "tiktok_solo_speech",
+    "url": "https://www.tiktok.com/t/ZTyoeRBc5/",
+    "user_description": "One woman speaking on camera; user describes intoxicated delivery",
+    "expected_speakers_note": "1, unverified",
+    "reference_status": "needs listening and timestamp annotation"
+  },
+  {
+    "id": "tiktok_singing",
+    "url": "https://www.tiktok.com/t/ZTyoJoPAo/",
+    "user_description": "One female singer singing",
+    "expected_speakers_note": "1; check backing vocals/layering",
+    "reference_status": "needs listening and timestamp annotation"
+  },
+  {
+    "id": "instagram_game_chat",
+    "url": "https://www.instagram.com/reel/DYQStIiBQIo/",
+    "user_description": "Game chat with gunshots",
+    "expected_speakers_note": "4, user-confirmed; fourth overlaps with other speakers",
+    "reference_status": "needs listening and timestamp annotation"
+  },
+  {
+    "id": "instagram_street_interview",
+    "url": "https://www.instagram.com/reel/DehxSE9vjpD/",
+    "user_description": "Clear street interview, alternating speakers",
+    "expected_speakers_note": "2, unverified",
+    "reference_status": "needs listening and timestamp annotation"
+  },
+  {
+    "id": "instagram_debate",
+    "url": "https://www.instagram.com/reel/DeZk4_dvGV9/",
+    "user_description": "Two women debating, strong Indian accents, clapping and audience vocalizations",
+    "expected_speakers_note": "2 principal speakers; audience may add voices",
+    "reference_status": "needs listening and timestamp annotation"
+  },
+  {
+    "id": "instagram_judge",
+    "url": "https://www.instagram.com/reel/Dd63P3kxTSf/",
+    "user_description": "Judge Adam Levy presiding, clear audio",
+    "expected_speakers_note": "up to 3, unverified",
+    "reference_status": "needs listening and timestamp annotation"
+  }
+]

@@ -19,6 +19,7 @@ It also includes a command-line client for programmatic transcribe/download acce
 - Download the original video to the phone
 - Paste Instagram post/reel links, browse the thumbnail grid, and batch-download selected posts as a zip
 - Transcribe a URL or uploaded local media file
+- Optionally identify speakers locally with NVIDIA, producing timestamped anonymous speaker labels; leave the option off for plain captions-first transcription
 - Run preset transcript analysis modes like caption ideas, hook rewrites, title packs, and custom prompts
 - Reach the service privately through Tailscale
 
@@ -92,3 +93,7 @@ It also includes a command-line client for programmatic transcribe/download acce
 - **yt-dlp**: media download and extraction
 - **Whisper (MLX on Apple Silicon, faster-whisper or openai-whisper elsewhere)**: transcription
 - **Ollama**: local AI analysis
+
+## Speaker-labeling behavior
+
+The private Media page offers an off-by-default Identify speakers checkbox. Automatic speaker counts require no prior knowledge of the recording. It applies to uploaded media and URL batches, labeling each source independently. Ambiguous overlap is explicitly marked; names are not inferred. NVIDIA supports up to eight speaker channels. Renaming speakers and recognizing voices across recordings are not implemented. This web feature does not add a desktop speaker-labeling workflow. Initial setup is supported on Apple Silicon; all inference remains on the local machine.

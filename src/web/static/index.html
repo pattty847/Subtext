@@ -12,7 +12,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/icon-180.png">
   <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="/static/icons/icon-512.png">
-  <link rel="stylesheet" href="/static/style.css?v=20260601a">
+  <link rel="stylesheet" href="/static/style.css?v=20261015speakers">
 </head>
 <body>
 
@@ -89,6 +89,11 @@
               </label>
             </div>
 
+            <label class="speaker-option" for="identify-speakers">
+              <input type="checkbox" id="identify-speakers" aria-describedby="speaker-option-help">
+              <span>Identify speakers <small id="speaker-option-help">NVIDIA · automatic Person 1, Person 2 labels. Uses audio; takes longer.</small></span>
+            </label>
+
             <div class="action-row action-row--stack-mobile">
               <button id="submit-btn" class="btn btn-primary" type="submit">Transcribe</button>
               <button id="download-audio-btn" class="btn btn-accent" type="button">Download Audio</button>
@@ -149,15 +154,22 @@
 
           <form id="ig-form" class="media-form" novalidate>
             <div class="field">
-              <label class="field-label" for="ig-url-input">Instagram links</label>
+              <label class="field-label" for="ig-profile-input">Creator profile</label>
+              <input id="ig-profile-input" type="text" placeholder="@creator or instagram.com/creator/"
+                     autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="ig-profile-help">
+              <p id="ig-profile-help" class="ig-help">Browse a creator, then select videos to download or transcribe.</p>
+            </div>
+            <details class="ig-links-details">
+              <summary>Use individual post or reel links</summary>
+              <label class="field-label" for="ig-url-input">Post or reel links</label>
               <textarea id="ig-url-input"
                         placeholder="Paste Instagram post or reel links, one per line…"
                         autocomplete="off" autocapitalize="off" spellcheck="false"
                         rows="3"></textarea>
-              <div id="ig-count-hint" class="url-count-hint hidden">1 link detected</div>
-            </div>
+              <div id="ig-count-hint" class="url-count-hint hidden"></div>
+            </details>
             <div class="action-row">
-              <button id="ig-load-btn" class="btn btn-primary" type="submit">Load grid</button>
+              <button id="ig-load-btn" class="btn btn-primary" type="submit">Browse profile</button>
               <button id="ig-clear-btn" class="btn btn-secondary" type="button">Clear</button>
             </div>
           </form>
@@ -172,16 +184,19 @@
 
         <div class="media-col media-col--output">
 
+          <div id="ig-profile-heading" class="ig-profile-heading hidden" aria-live="polite"></div>
           <div class="ig-toolbar hidden" id="ig-toolbar">
             <span id="ig-selected-count" class="ig-selected-count">0 selected</span>
             <div class="ig-toolbar-actions">
               <button id="ig-select-all-btn" class="btn btn-secondary btn-sm" type="button">Select all</button>
+              <button id="ig-transcribe-btn" class="btn btn-primary btn-sm" type="button" disabled>Transcribe selected</button>
               <button id="ig-download-btn" class="btn btn-accent btn-sm" type="button">Download</button>
             </div>
           </div>
 
-          <div class="ig-grid" id="ig-grid"></div>
-          <div class="ig-empty" id="ig-empty">Paste some Instagram links and hit Load grid.</div>
+          <div class="ig-grid" id="ig-grid" aria-label="Creator posts" aria-busy="false"></div>
+          <button id="ig-more-btn" class="btn btn-secondary hidden" type="button">Load more posts</button>
+          <div class="ig-empty" id="ig-empty">Enter a creator profile to browse their posts. Photos are shown for context; select videos to process.</div>
 
         </div><!-- /.media-col--output -->
       </div><!-- /.media-layout -->
@@ -428,6 +443,6 @@
     </button>
   </nav>
 
-  <script src="/static/app.js?v=20260601a"></script>
+  <script src="/static/app.js?v=20261015speakers"></script>
 </body>
 </html>

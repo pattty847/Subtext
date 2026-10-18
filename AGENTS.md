@@ -85,7 +85,7 @@ Do not place heavy business logic directly in Qt tab classes or browser-facing J
 - If captions fail, are unavailable, or rate-limit, fallback is Whisper.
 - Batch work is sequential by design for memory stability.
 - Desktop processing unloads Whisper resources after runs.
-- Private web service keeps the transcription model warm across requests.
+- Private web service keeps the transcription model warm across plain requests. Optional NVIDIA speaker labeling unloads it before diarization, then reloads Whisper for word timestamps to keep model stages sequential.
 - Ollama calls use low-memory behavior and should remain desktop-focused unless intentionally expanded.
 
 ## Private Web Service Expectations
@@ -216,3 +216,12 @@ Common sources of confusion in this repo:
 - secrets accidentally being placed in tracked plist/templates
 
 Part of the job is keeping these aligned when behavior changes.
+
+## Optional web speaker labeling
+
+- Core: `src/core/diarization.py`; timestamped ASR: `WhisperTranscriber.transcribe_words`.
+- Setup: `uv run python scripts/setup_diarization.py` (Apple Silicon helper).
+- `identify_speakers` is an explicit multipart flag, off by default; it bypasses captions because voice attribution needs audio.
+- Keep native diarization, Whisper, and batch work sequential under the service lock. Preserve MLX thread affinity and process/temporary-file cleanup on cancellation.
+- Speaker IDs apply within each recording; never imply cross-file identity. Mark overlapping/boundary ambiguity rather than forcing a confident voice label.
+- Instagram profile lookup is paused by default; diarization changes must not resume profile requests.

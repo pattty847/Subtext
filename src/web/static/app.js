@@ -42,6 +42,7 @@
   const filePickLabel       = $('file-pick-label');
   const filePickText        = $('file-pick-text');
   const submitBtn           = $('submit-btn');
+  const identifySpeakers    = $('identify-speakers');
   const urlPasteBtn         = $('url-paste-btn');
   const urlCountHint        = $('url-count-hint');
   const downloadAudioBtn    = $('download-audio-btn');
@@ -336,6 +337,7 @@
       btn.setAttribute('aria-current', active ? 'page' : 'false');
     });
 
+    if (page === 'ig') igRenderToolbar();
     if (page === 'chat') {
       chatInput.focus();
       scrollToBottom();
@@ -503,6 +505,7 @@
   function setMediaBusy(busy) {
     state.transcribeBusy = !!busy;
     submitBtn.disabled = busy;
+    identifySpeakers.disabled = busy;
     downloadAudioBtn.disabled = busy;
     downloadBtn.disabled = busy;
   }
@@ -580,6 +583,7 @@
     var fd = new FormData();
     if (url)  fd.append('url',  url);
     if (file) fd.append('file', file);
+    fd.append('identify_speakers', identifySpeakers.checked ? 'true' : 'false');
 
     setMediaBusy(true);
     showStatus(url ? 'Downloading and transcribing…' : 'Uploading and transcribing…');
@@ -1816,10 +1820,14 @@
   // ─── IG grid ────────────────────────────────────────────────────────────
   //
   // Paste Instagram post/reel links -> server resolves thumbnails -> tap to
-  // select -> batch download as a zip. Post *lists* cannot be fetched on the
-  // box (see src/core/instagram_grid.py), so links come from the user or
-  // from chat with an agent that has Instagram access.
+  // select -> download or hand off to the sequential transcription flow.
 
+  const igProfileInput = $('ig-profile-input');
+  const igMoreBtn = $('ig-more-btn');
+  const igProfileHeading = $('ig-profile-heading');
+  const igTranscribeBtn = $('ig-transcribe-btn');
+  var igCursor = '';
+  var igCreator = '';
   const igForm              = $('ig-form');
   const igUrlInput          = $('ig-url-input');
   const igCountHint         = $('ig-count-hint');
@@ -1854,14 +1862,22 @@
   }
 
   function igSelected() {
-    return igPosts.filter(function (post) { return post.selected && post.ok; });
+    return igPosts.filter(function (post) { return post.selected && post.ok && post.selectable !== false; });
   }
 
   function igRenderToolbar() {
     var n = igSelected().length;
     igToolbar.classList.toggle('hidden', igPosts.length === 0);
-    igSelectedCount.textContent = n === 1 ? '1 selected' : n + ' selected';
+    igSelectedCount.textContent = n + ' / 10 selected';
     igDownloadBtn.disabled = igBusy || n === 0;
+    igTranscribeBtn.disabled = igBusy || n === 0 || state.transcribeBusy;
+    igMoreBtn.disabled = igBusy;
+    igMoreBtn.classList.toggle('hidden', !igCursor);
+    igClearBtn.disabled = igBusy;
+    igSelectAllBtn.disabled = igBusy;
+    igProfileInput.disabled = igBusy;
+    igUrlInput.disabled = igBusy;
+    igGrid.setAttribute('aria-busy', igBusy ? 'true' : 'false');
     igDownloadBtn.textContent = n > 0 ? 'Download (' + n + ')' : 'Download';
   }
 
@@ -1878,6 +1894,8 @@
       card.type = 'button';
       card.className = 'ig-card' + (post.selected ? ' selected' : '') + (post.ok ? '' : ' ig-card--error');
       card.setAttribute('aria-pressed', post.selected ? 'true' : 'false');
+      card.setAttribute('aria-label', (post.selectable === false ? 'Photo: ' : 'Select video: ') + igCardLabel(post));
+      card.disabled = !post.ok || post.selectable === false;
 
       if (post.thumb) {
         var img = document.createElement('img');
@@ -1902,63 +1920,84 @@
 
       var cap = document.createElement('span');
       cap.className = 'ig-cap';
-      cap.textContent = igCardLabel(post);
+      cap.textContent = (post.selectable === false ? 'Photo · ' : '') + igCardLabel(post);
       card.appendChild(cap);
 
       card.addEventListener('click', function () {
-        if (!post.ok || igBusy) return;
+        if (!post.ok || post.selectable === false || igBusy) return;
+        if (!post.selected && igSelected().length >= 10) { igShowStatus('Select up to 10 videos per batch.'); return; }
         post.selected = !post.selected;
         card.classList.toggle('selected', post.selected);
         card.setAttribute('aria-pressed', post.selected ? 'true' : 'false');
         igRenderToolbar();
       });
-      igGrid.appendChild(card);
+      var tile = document.createElement('div');
+      tile.className = 'ig-tile';
+      tile.appendChild(card);
+      var preview = document.createElement('a');
+      preview.href = post.url;
+      preview.target = '_blank';
+      preview.rel = 'noopener noreferrer';
+      preview.className = 'ig-preview';
+      preview.textContent = 'Open in Instagram';
+      preview.setAttribute('aria-label', 'Open in Instagram: ' + igCardLabel(post));
+      tile.appendChild(preview);
+      igGrid.appendChild(tile);
     });
     igRenderToolbar();
   }
 
-  async function igLoadGrid(evt) {
+  async function igLoadGrid(evt, append) {
     if (evt) evt.preventDefault();
     if (igBusy) return;
     if (!state.apiKey) { igShowStatus('Enter the shared key first.'); return; }
+    var creator = append ? igCreator : igProfileInput.value.trim();
     var urls = parseUrlsFromText(igUrlInput.value);
-    if (!urls.length) { igShowStatus('Paste at least one Instagram link.'); return; }
-
+    if (!creator && !urls.length) { igShowStatus('Enter a creator profile or paste post links.'); return; }
+    if (!append) {
+      igPosts = [];
+      igCursor = '';
+      igProfileHeading.classList.add('hidden');
+      igRenderGrid();
+    }
     igBusy = true;
     igLoadBtn.disabled = true;
-    igShowStatus('Loading grid…');
+    igMoreBtn.textContent = 'Loading…';
+    igRenderToolbar();
+    igShowStatus(creator ? 'Loading creator posts…' : 'Loading linked posts…');
     try {
-      var res = await fetch('/ig/grid', {
+      var res = await fetch(creator ? '/ig/profile' : '/ig/grid', {
         method: 'POST',
         headers: apiHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ urls: urls }),
+        body: JSON.stringify(creator ? { creator: creator, cursor: append ? igCursor : '' } : { urls: urls }),
       });
       var data = await res.json().catch(function () { return {}; });
-      if (!res.ok) throw new Error(data.detail || 'Could not load the grid.');
-      igPosts = (data.posts || []).map(function (item) {
-        return {
-          shortcode: item.shortcode,
-          url: item.url,
-          title: item.title || '',
-          caption: item.caption || '',
-          ok: !!item.ok,
-          error: item.error || '',
-          thumb: item.thumb || null,
-          selected: false,
-        };
+      if (!res.ok) throw new Error(data.detail || 'Could not load posts.');
+      var seen = {};
+      igPosts.forEach(function (post) { seen[post.shortcode] = true; });
+      (data.posts || []).forEach(function (item) {
+        if (!seen[item.shortcode]) {
+          item.selected = false;
+          igPosts.push(item);
+          seen[item.shortcode] = true;
+        }
       });
+      igCursor = data.cursor || '';
+      if (data.creator) {
+        igCreator = data.creator.username;
+        igProfileHeading.textContent = '@' + data.creator.username + (data.creator.name ? ' · ' + data.creator.name : '');
+        igProfileHeading.classList.remove('hidden');
+      }
       igRenderGrid();
-      var failed = igPosts.filter(function (post) { return !post.ok; }).length;
-      var msg = igPosts.length + ' post' + (igPosts.length === 1 ? '' : 's') + ' loaded.';
-      if (data.skipped) msg += ' ' + data.skipped + ' skipped (not IG links).';
-      if (failed) msg += ' ' + failed + ' failed to load.';
-      igShowStatus(msg);
-      setTimeout(igHideStatus, 4000);
+      igShowStatus(igPosts.length + ' posts loaded. Select videos; photos are view-only.' +
+        (data.skipped ? ' ' + data.skipped + ' unsupported links skipped.' : ''));
+      igEmpty.textContent = 'No posts returned for this creator.';
     } catch (err) {
-      igShowStatus(err.message || 'Could not load the grid.');
+      igShowStatus(err.message || 'Could not load posts.');
     } finally {
       igBusy = false;
       igLoadBtn.disabled = false;
+      igMoreBtn.textContent = 'Load more posts';
       igRenderToolbar();
     }
   }
@@ -2012,17 +2051,43 @@
   igUrlInput.addEventListener('input', igUpdateCountHint);
   igClearBtn.addEventListener('click', function () {
     igUrlInput.value = '';
+    igProfileInput.value = '';
+    igProfileHeading.classList.add('hidden');
+    igCursor = '';
+    igCreator = '';
+    igEmpty.textContent = 'Enter a creator profile to browse their posts.';
     igPosts = [];
     igUpdateCountHint();
     igRenderGrid();
     igHideStatus();
   });
   igSelectAllBtn.addEventListener('click', function () {
-    var anyUnselected = igPosts.some(function (post) { return post.ok && !post.selected; });
-    igPosts.forEach(function (post) { if (post.ok) post.selected = anyUnselected; });
+    var selectable = igPosts.filter(function (post) { return post.ok && post.selectable !== false; });
+    var select = !igSelected().length;
+    selectable.forEach(function (post, index) { post.selected = select && index < 10; });
     igRenderGrid();
   });
   igDownloadBtn.addEventListener('click', igDownloadSelected);
+  igMoreBtn.addEventListener('click', function () { igLoadGrid(null, true); });
+  igProfileInput.addEventListener('input', function () {
+    if (igProfileInput.value.trim()) igUrlInput.value = '';
+    igLoadBtn.textContent = igProfileInput.value.trim() ? 'Browse profile' : 'Load posts';
+    igUpdateCountHint();
+  });
+  igUrlInput.addEventListener('input', function () {
+    if (igUrlInput.value.trim()) igProfileInput.value = '';
+    igLoadBtn.textContent = 'Load posts';
+  });
+  igTranscribeBtn.addEventListener('click', function () {
+    if (igBusy || state.transcribeBusy || !igSelected().length) return;
+    urlInput.value = igSelected().map(function (post) { return post.url; }).join('\n');
+    fileInput.value = '';
+    filePickText.textContent = 'Choose audio or video…';
+    filePickLabel.classList.remove('has-file');
+    updateUrlCountHint();
+    switchPage('media');
+    transcribeForm.requestSubmit();
+  });
 
   function init() {
     var stored = localStorage.getItem(STORAGE_KEY) || '';
