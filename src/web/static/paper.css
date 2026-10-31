@@ -7,7 +7,7 @@
   --accent-border: #bdcdb8; --accent-glow: transparent;
   --danger: #a4382c; --danger-bg: #f3e1db; --success: #275b46;
   --on-accent: #faf8f2; --text-1: var(--text); --quote: #b9c7b0;
-  color-scheme: light; --r: 6px; --r-sm: 6px; --top-h: 76px; --bottom-h: 68px;
+  color-scheme: light; --r: 6px; --r-sm: 6px; --top-h: 76px; --bottom-h: 56px;
 }
 /* Dark is the default; light is an explicit, remembered preference. */
 :root:not([data-theme="light"]) {
@@ -28,12 +28,11 @@ body { background: var(--bg); }
 .service-dot.ok { box-shadow: none; }
 .preview-label { font-family: var(--mono); font-size: 9px; letter-spacing: 1.5px; color: var(--text-3); margin-right: 10px; }
 .icon-btn { border-radius: 50%; background: transparent; border-color: var(--border-mid); }
-.page { padding: 22px 26px 100px; }
+.page { padding: 22px 26px calc(var(--bottom-h) + env(safe-area-inset-bottom, 0px) + 16px); }
 .paper-heading { max-width: 1080px; margin: 0 auto 32px; }
-.paper-eyebrow { font-family: var(--mono); font-size: 9px; letter-spacing: 1.3px; color: var(--text-3); margin-bottom: 18px; }
 .paper-heading h1 { font-size: clamp(36px, 5vw, 66px); line-height: 1.02; letter-spacing: -2px; font-weight: 500; }
 .paper-heading h1 em { font-family: Georgia, 'Times New Roman', serif; font-weight: 400; color: var(--accent); }
-#page-media .notice { max-width: 1080px; margin: 0 auto 20px; background: transparent; border: 0; padding: 0; font-family: var(--mono); font-size: 10px; }
+#page-media .notice { margin: 10px 0 0; background: transparent; border: 0; padding: 0; font-family: var(--mono); font-size: 10px; white-space: nowrap; overflow-x: auto; }
 #page-media .media-layout { max-width: 1080px; gap: 32px; }
 .media-form { gap: 20px; }
 .field-label { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; color: var(--text-2); }
@@ -91,8 +90,6 @@ body { background: var(--bg); }
   .page { padding-top: 16px; }
   .paper-heading { margin-bottom: 26px; }
   .paper-heading h1 { font-size: 52px; }
-  .paper-eyebrow { margin-bottom: 12px; }
-  #page-media .notice { margin-bottom: 16px; }
   .media-form { gap: 14px; }
   #url-input { min-height: 100px; }
   .paper-empty { min-height: 350px; }

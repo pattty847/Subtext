@@ -112,8 +112,9 @@
 
   // Nav
   const navMedia            = $('nav-media');
-  const navIg               = $('nav-ig');
   const navChat             = $('nav-chat');
+  const batchLinksBtn       = $('batch-links-btn');
+  const igBackBtn           = $('ig-back-btn');
 
   // ─── Utilities ────────────────────────────────────────────────────────────
 
@@ -328,7 +329,7 @@
       target.removeAttribute('aria-hidden');
     }
 
-    [navMedia, navIg, navChat].forEach(function (btn) {
+    [navMedia, navChat].forEach(function (btn) {
       var active = btn.dataset.page === page;
       btn.classList.toggle('active', active);
       btn.setAttribute('aria-current', active ? 'page' : 'false');
@@ -343,7 +344,16 @@
 
   navMedia.addEventListener('click', function () { switchPage('media'); });
   navChat.addEventListener('click', function () { switchPage('chat'); });
-  navIg.addEventListener('click', function () { switchPage('ig'); });
+
+  // Batch select/download is reached from Media once 2+ links are pasted,
+  // not from the bottom nav — it's a rarely-used path.
+  batchLinksBtn.addEventListener('click', function () {
+    igUrlInput.value = urlInput.value;
+    switchPage('ig');
+    igUpdateCountHint();
+    if (igForm.requestSubmit) igForm.requestSubmit(); else igLoadBtn.click();
+  });
+  igBackBtn.addEventListener('click', function () { switchPage('media'); });
 
   // ─── Key drawer ───────────────────────────────────────────────────────────
 
@@ -454,8 +464,10 @@
     if (count > 1) {
       urlCountHint.textContent = count + ' links detected';
       urlCountHint.classList.remove('hidden');
+      batchLinksBtn.classList.remove('hidden');
     } else {
       urlCountHint.classList.add('hidden');
+      batchLinksBtn.classList.add('hidden');
     }
   }
 
@@ -479,20 +491,25 @@
     });
   }
 
+  var autoPreviewTimer = null;
+
   function resetLinkPreviews() {
     if (previewRequest) previewRequest.abort();
     previewRequest = null;
     previewLinksBtn.disabled = false;
-    previewLinksBtn.textContent = 'Preview Instagram links';
-    previewLinksBtn.classList.toggle('hidden', !instagramPreviewUrls().length);
     mediaLinkPreviews.replaceChildren();
     mediaLinkPreviews.classList.add('hidden');
+    clearTimeout(autoPreviewTimer);
+    if (instagramPreviewUrls().length && state.apiKey) {
+      autoPreviewTimer = setTimeout(loadLinkPreviews, 500);
+    }
   }
 
   urlInput.addEventListener('input', resetLinkPreviews);
   fileInput.addEventListener('change', resetLinkPreviews);
-  previewLinksBtn.addEventListener('click', async function () {
-    if (!state.apiKey) { toast('Enter the shared key first.'); return; }
+  previewLinksBtn.addEventListener('click', loadLinkPreviews);
+  async function loadLinkPreviews() {
+    if (!state.apiKey) return;
     var urls = instagramPreviewUrls();
     if (!urls.length) return;
     var controller = new AbortController();
@@ -542,7 +559,7 @@
         previewLinksBtn.disabled = false;
       }
     }
-  });
+  }
 
   // Paste button: one tap if Clipboard API is available (HTTPS contexts);
   // otherwise focus the URL field so iOS shows Paste in the keyboard bar.
