@@ -916,7 +916,12 @@ async def index() -> HTMLResponse:
     index_html = STATIC_DIR / "index.html"
     if not index_html.exists():
         raise HTTPException(status_code=404, detail="Static files not found.")
-    return HTMLResponse(index_html.read_text(encoding="utf-8"))
+    # iOS "Add to Home Screen" apps cache the entry document stubbornly across
+    # relaunches; force revalidation so deployed UI changes always show up.
+    return HTMLResponse(
+        index_html.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
 
 
 @app.get("/health")
