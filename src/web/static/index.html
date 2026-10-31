@@ -77,7 +77,6 @@
                 </button>
               </div>
               <button id="preview-links-btn" class="btn btn-secondary btn-sm hidden" type="button">Preview Instagram links</button>
-              <div id="media-link-previews" class="media-link-previews hidden" aria-live="polite"></div>
               <div class="url-count-row">
                 <div id="url-count-hint" class="url-count-hint hidden">1 link detected</div>
                 <button id="batch-links-btn" class="link-btn hidden" type="button">Batch select &amp; download &rarr;</button>
@@ -115,6 +114,9 @@
             <span class="pulse-ring"></span>
             <span id="status-text">Processing…</span>
           </div>
+
+          <!-- Instagram link previews (below the buttons so they never shift a tap target) -->
+          <div id="media-link-previews" class="media-link-previews hidden" aria-live="polite"></div>
 
         </div><!-- /.media-col--input -->
 
